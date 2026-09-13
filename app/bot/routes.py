@@ -22,6 +22,51 @@ from app.models.bot import BotReceipt, ChatObservation, HouseChat
 router = APIRouter(prefix="/api/bots/max", tags=["MAX bots"])
 MAX_UPDATE_BYTES = 256 * 1024
 IMPORTANT_WORDS = ("пожар", "дым", "запах газа", "прорвало", "затоп", "искрит", "авари")
+PROBLEM_WORDS = (
+    "теч",
+    "прорв",
+    "затоп",
+    "нет воды",
+    "нет света",
+    "не работает",
+    "сломал",
+    "сломано",
+    "лифт",
+    "отоплен",
+    "холодн",
+    "канализац",
+    "засор",
+    "пожар",
+    "дым",
+    "газ",
+    "искрит",
+    "авари",
+    "протек",
+    "мусор",
+)
+
+
+def looks_like_problem(text: str) -> bool:
+    normalized = " ".join(text.casefold().split())
+    return len(normalized) >= 6 and any(word in normalized for word in PROBLEM_WORDS)
+
+
+async def notify_group_problem(
+    db: AsyncSession,
+    settings: Settings,
+    max_user_id: int,
+    problem: str,
+) -> None:
+    for operator_id in settings.max_owner_ids:
+        try:
+            operator = await native_actor(db, settings, operator_id)
+        except InvalidCredentials:
+            continue
+        await reply(
+            db,
+            operator,
+            f"Сигнал из чата\nMAX ID: {max_user_id}\nПроблема: {problem[:3400]}",
+        )
 
 
 @router.post("/{namespace}")
@@ -55,7 +100,8 @@ async def max_webhook(
     if update is None:
         return {"ok": True}
     if namespace == "staff" and not update.is_private:
-        return {"ok": True}
+        if update.update_type != "message_created" or not update.text:
+            return {"ok": True}
     if namespace == "observer":
         if update.is_private or update.update_type != "message_created" or not update.text:
             return {"ok": True}
@@ -70,6 +116,13 @@ async def max_webhook(
         .returning(BotReceipt.event_key)
     )
     if receipt is None:
+        await db.commit()
+        return {"ok": True}
+
+    if namespace == "staff" and not update.is_private:
+        assert update.text is not None
+        if looks_like_problem(update.text):
+            await notify_group_problem(db, settings, update.actor_id, update.text)
         await db.commit()
         return {"ok": True}
 
