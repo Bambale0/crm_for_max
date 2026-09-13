@@ -17,9 +17,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.schema import CreateSchema
 
 from app.api.dependencies import get_db
-from app.bot.ui import reply
 from app.bot.identity import native_actor, resident_actor
 from app.bot.setup import bind_chat, initialize
+from app.bot.ui import reply
 from app.bot.worker import deliver_one
 from app.core.config import Settings
 from app.integrations.max.messaging import MaxMessagingClient
