@@ -18,8 +18,8 @@ from app.bot.admin import (
 )
 from app.bot.dialogs import conversation, handle_staff, staff_menu
 from app.bot.identity import native_actor, resident_actor
-from app.bot.ui import reply
 from app.bot.resident import handle_resident, resident_menu
+from app.bot.ui import reply
 from app.bot.updates import normalize_update
 from app.core.config import Settings
 from app.crm.errors import CRMConflict, CRMError
