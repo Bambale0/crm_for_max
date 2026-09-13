@@ -126,9 +126,7 @@ async def initialize(
         await db.flush()
 
     for max_id in settings.max_staff_ids:
-        target_role = (
-            operator_role if max_id in settings.max_dispatcher_ids else employee_role
-        )
+        target_role = operator_role if max_id in settings.max_dispatcher_ids else employee_role
         employee = await db.scalar(
             select(Employee).where(
                 Employee.organization_id == org.id, Employee.max_user_id == max_id
