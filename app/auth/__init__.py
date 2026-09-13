@@ -1,0 +1,1 @@
+"""MAX Mini App authentication."""

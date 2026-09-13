@@ -1,0 +1,17 @@
+# Only application inputs enter the build context.
+**
+!Dockerfile
+!.dockerignore
+!pyproject.toml
+!uv.lock
+!alembic.ini
+!app/
+!app/**
+!migrations/
+!migrations/**
+**/__pycache__/
+**/*.py[cod]
+**/.env*
+**/*.pem
+**/*.key
+**/*.log
