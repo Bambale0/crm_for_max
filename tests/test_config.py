@@ -51,3 +51,8 @@ def test_bot_namespaces_require_distinct_secrets() -> None:
             max_staff_webhook_secret=SecretStr("x" * 32),
             max_observer_webhook_secret=SecretStr("x" * 32),
         )
+
+
+def test_operator_and_employee_ids_cannot_overlap() -> None:
+    with pytest.raises(ValidationError, match="must not overlap"):
+        Settings(_env_file=None, max_operator_ids=(202,), max_employee_ids=(202,))
