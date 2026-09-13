@@ -7,7 +7,7 @@ from sqlalchemy import Connection, pool
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.core.config import Settings
-from app.models import identity  # noqa: F401 -- register mapped tables for autogenerate
+from app.models import crm, identity  # noqa: F401 -- register mapped tables for autogenerate
 from app.models.base import Base
 
 

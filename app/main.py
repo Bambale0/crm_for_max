@@ -17,6 +17,9 @@ from app.core.config import Settings
 from app.core.database import Database
 from app.core.logging import configure_logging
 from app.core.request_logging import RequestLoggingMiddleware
+from app.crm.catalog import router as catalog_router
+from app.crm.errors import CRMError
+from app.crm.requests import router as requests_router
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +85,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # wrap the error. Do not expose infrastructure exceptions through the API.
     app.add_exception_handler(OSError, unavailable)
     app.add_exception_handler(TimeoutError, unavailable)
+
+    @app.exception_handler(CRMError)
+    async def crm_error(request: Request, exc: CRMError) -> JSONResponse:
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"detail": exc.detail},
+            headers={"Cache-Control": "no-store"},
+        )
+
     app.include_router(health_router)
     app.include_router(auth_router)
+    app.include_router(catalog_router)
+    app.include_router(requests_router)
     return app

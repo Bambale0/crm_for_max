@@ -36,6 +36,8 @@ class AuditLog(Base):
     actor_id: Mapped[UUID | None] = mapped_column(ForeignKey("users.id"), index=True)
     subject_id: Mapped[UUID | None] = mapped_column(ForeignKey("users.id"))
     action: Mapped[str] = mapped_column(String(64))
+    target_type: Mapped[str | None] = mapped_column(String(40))
+    target_id: Mapped[UUID | None] = mapped_column()
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), index=True
     )

@@ -90,6 +90,8 @@ async def test_owner_login_me_logout_and_safe_audit(
         "actor_id",
         "subject_id",
         "action",
+        "target_type",
+        "target_id",
         "created_at",
     }
 

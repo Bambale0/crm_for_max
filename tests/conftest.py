@@ -1,7 +1,13 @@
 """Integration tests use disposable databases and roll back every SQL transaction."""
 
+import hashlib
+import hmac
+import json
 import os
+import time
 from collections.abc import AsyncIterator
+from urllib.parse import quote, urlencode
+from uuid import uuid4
 
 import pytest
 from asgi_lifespan import LifespanManager
@@ -88,3 +94,32 @@ async def client(app: FastAPI) -> AsyncIterator[AsyncClient]:
     async with LifespanManager(app):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as http:
             yield http
+
+
+async def _max_headers(client: AsyncClient, settings: Settings, max_user_id: int) -> dict[str, str]:
+    assert settings.max_staff_token is not None
+    fields = {
+        "auth_date": str(int(time.time())),
+        "query_id": str(uuid4()),
+        "user": json.dumps({"id": max_user_id, "first_name": "Synthetic employee"}),
+    }
+    secret = hmac.digest(
+        b"WebAppData", settings.max_staff_token.get_secret_value().encode(), "sha256"
+    )
+    check = "\n".join(f"{key}={value}" for key, value in sorted(fields.items()))
+    fields["hash"] = hmac.new(secret, check.encode(), hashlib.sha256).hexdigest()
+    response = await client.post(
+        "/api/auth/max", json={"init_data": urlencode(fields, quote_via=quote)}
+    )
+    assert response.status_code == 200, response.text
+    return {"Authorization": "Bearer " + response.json()["access_token"]}
+
+
+@pytest.fixture
+async def owner_headers(client: AsyncClient, test_settings: Settings) -> dict[str, str]:
+    return await _max_headers(client, test_settings, 101)
+
+
+@pytest.fixture
+async def employee_headers(client: AsyncClient, test_settings: Settings) -> dict[str, str]:
+    return await _max_headers(client, test_settings, 202)
