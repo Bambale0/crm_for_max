@@ -121,6 +121,7 @@ class Role(Base):
 class Employee(Base):
     __tablename__ = "employees"
     __table_args__ = (
+        UniqueConstraint("organization_id", "id", name="uq_employees_organization_id_id"),
         UniqueConstraint("organization_id", "max_user_id"),
         ForeignKeyConstraint(
             ["organization_id", "role_id"],
@@ -202,7 +203,14 @@ class ServiceRequest(Base):
             ["request_statuses.organization_id", "request_statuses.id"],
             name="fk_requests_organization_status",
         ),
+        ForeignKeyConstraint(
+            ["organization_id", "assignee_id"],
+            ["employees.organization_id", "employees.id"],
+            name="fk_requests_organization_assignee",
+        ),
+        CheckConstraint("revision >= 0", name="nonnegative_revision"),
         Index("ix_requests_organization_created", "organization_id", "created_at", "id"),
+        Index("ix_requests_assignee_created", "assignee_id", "created_at", "id"),
     )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
@@ -212,6 +220,8 @@ class ServiceRequest(Base):
     entrance_id: Mapped[UUID | None] = mapped_column()
     category_id: Mapped[UUID] = mapped_column()
     status_id: Mapped[UUID] = mapped_column()
+    assignee_id: Mapped[UUID | None] = mapped_column()
+    revision: Mapped[int] = mapped_column(default=0, server_default=text("0"))
     applicant_name: Mapped[str | None] = mapped_column(String(200))
     applicant_phone: Mapped[str | None] = mapped_column(String(50))
     apartment: Mapped[str | None] = mapped_column(String(30))

@@ -31,3 +31,19 @@ def test_blank_deployment_tokens_disable_auth(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setenv("MAX_OWNER_IDS", "")
     assert Settings(_env_file=None).max_staff_token is None
     assert Settings(_env_file=None).max_owner_ids == ()
+
+
+@pytest.mark.parametrize("secret", ["short", "x" * 257, "x" * 32 + "\n", "ю" * 32])
+def test_invalid_webhook_secret_is_redacted(secret: str) -> None:
+    with pytest.raises(ValidationError) as caught:
+        Settings(_env_file=None, max_staff_webhook_secret=SecretStr(secret))
+    assert secret not in str(caught.value)
+
+
+def test_bot_namespaces_require_distinct_secrets() -> None:
+    with pytest.raises(ValidationError, match="must differ"):
+        Settings(
+            _env_file=None,
+            max_staff_webhook_secret=SecretStr("x" * 32),
+            max_observer_webhook_secret=SecretStr("x" * 32),
+        )

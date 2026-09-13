@@ -214,3 +214,9 @@ docker compose --profile test stop postgres-test redis-test
 Установка uv в образ следует [руководству uv для Docker](https://docs.astral.sh/uv/guides/integration/docker/).
 При обновлении версий меняйте Compose, Dockerfile и CI согласованно и повторяйте
 проверки на чистой тестовой базе.
+## Работа без веб-интерфейса
+
+Актуальные сценарии бота и настройка справочника командами описаны в
+[простом боте](simple-bot.md). Для ответов MAX дополнительно запускается
+`uv run python -m app.bot.worker` или профиль Compose `bot`.
+Без реального env этот процесс не запускайте; локальные тесты используют моки MAX.

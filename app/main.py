@@ -13,6 +13,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.api.health import router as health_router
 from app.auth.routes import router as auth_router
+from app.bot.routes import router as bot_router
 from app.core.config import Settings
 from app.core.database import Database
 from app.core.logging import configure_logging
@@ -96,6 +97,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.include_router(health_router)
     app.include_router(auth_router)
+    app.include_router(bot_router)
     app.include_router(catalog_router)
     app.include_router(requests_router)
     return app

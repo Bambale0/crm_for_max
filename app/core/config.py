@@ -1,8 +1,10 @@
 """Typed environment configuration; all secret values have redacted reprs."""
 
-from typing import Annotated, Literal
+import re
+from typing import Annotated, Literal, Self
+from uuid import UUID
 
-from pydantic import Field, SecretStr, field_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import ArgumentError
@@ -25,6 +27,9 @@ class Settings(BaseSettings):
     redis_url: SecretStr = SecretStr("redis://127.0.0.1:6379/0")
     max_staff_token: SecretStr | None = None
     max_observer_token: SecretStr | None = None
+    max_staff_webhook_secret: SecretStr | None = None
+    max_observer_webhook_secret: SecretStr | None = None
+    max_bot_organization_id: UUID | None = None
     max_owner_ids: Annotated[tuple[int, ...], NoDecode] = ()
     max_employee_ids: Annotated[tuple[int, ...], NoDecode] = ()
     max_api_base_url: str = "https://platform-api2.max.ru"
@@ -34,6 +39,25 @@ class Settings(BaseSettings):
     session_ttl_seconds: int = Field(default=28800, ge=60, le=86400)
     login_rate_limit: int = Field(default=10, ge=1, le=100)
     login_rate_window_seconds: int = Field(default=60, ge=1, le=3600)
+
+    @field_validator("max_staff_webhook_secret", "max_observer_webhook_secret")
+    @classmethod
+    def check_webhook_secret(cls, value: SecretStr | None) -> SecretStr | None:
+        if value is not None and not re.fullmatch(
+            r"[A-Za-z0-9_-]{32,256}", value.get_secret_value()
+        ):
+            raise ValueError("Webhook secret must contain 32-256 ASCII letters, digits, _ or -")
+        return value
+
+    @model_validator(mode="after")
+    def distinct_webhook_secrets(self) -> Self:
+        if (
+            self.max_staff_webhook_secret is not None
+            and self.max_observer_webhook_secret is not None
+            and self.max_staff_webhook_secret == self.max_observer_webhook_secret
+        ):
+            raise ValueError("Staff and observer webhook secrets must differ")
+        return self
 
     @field_validator("max_owner_ids", "max_employee_ids", mode="before")
     @classmethod
