@@ -200,9 +200,7 @@ async def notify_owners(
     exclude_id: int | None = None,
     prefix: str = "Сотрудник обновил заявку.",
 ) -> None:
-    for max_id in await dispatcher_max_ids(
-        db, task.organization_id, settings.max_owner_ids
-    ):
+    for max_id in await dispatcher_max_ids(db, task.organization_id, settings.max_owner_ids):
         if max_id == exclude_id:
             continue
         try:
