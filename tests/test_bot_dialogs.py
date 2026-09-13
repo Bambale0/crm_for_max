@@ -132,7 +132,7 @@ async def test_employee_work_cycle_and_legacy_api(
     await send(client, event(payload=f"assign:{task.id}:0:{employee.id}"))
     await db_session.refresh(task)
     assert task.assignee_id == employee.id and task.revision == 1
-    assert "Вам назначена" in await latest_text(db_session, 202)
+    assert "Вам назначено задание" in await latest_text(db_session, 202)
     await send(client, event(202, payload=f"progress:{task.id}:1:needs"))
     assert "Что нужно для выполнения" in await latest_text(db_session, 202)
     report = event(202, text="Нужна лестница и напарник")
