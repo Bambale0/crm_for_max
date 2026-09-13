@@ -31,7 +31,7 @@ class RequestLoggingMiddleware:
                 status_code = message["status"]
                 headers = MutableHeaders(scope=message)
                 headers["X-Request-ID"] = request_id
-                if scope["path"].startswith(("/api/auth/", "/api/admin/")):
+                if scope["path"].startswith("/api/"):
                     headers["Cache-Control"] = "no-store"
             await send(message)
 
