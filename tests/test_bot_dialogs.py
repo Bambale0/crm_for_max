@@ -26,7 +26,7 @@ from app.integrations.max.messaging import MaxMessagingClient
 from app.main import create_app
 from app.models.base import Base
 from app.models.bot import BotConversation, BotDelivery, BotReceipt, ChatObservation
-from app.models.crm import Category, Employee, House, Organization, RequestStatus, ServiceRequest
+from app.models.crm import Category, Employee, House, Organization, RequestStatus, Role, ServiceRequest
 from app.models.task_progress import TaskProgress
 
 pytestmark = pytest.mark.integration
@@ -340,9 +340,15 @@ async def test_setup_is_repeatable_and_preserves_employee_scopes(
     employee = await db_session.scalar(select(Employee).where(Employee.max_user_id == 202))
     assert employee
     employee.all_houses = False
+    test_settings.max_operator_ids = (*test_settings.max_operator_ids, 202)
+    test_settings.max_employee_ids = ()
     await initialize(
         db_session, test_settings, "Не переименовывать", ["Тестовый дом 1"], bot_catalog.id
     )
+    await db_session.refresh(employee)
+    role = await db_session.get(Role, employee.role_id)
+    assert role is not None and role.name == "Оператор"
+    assert "requests.assign" in role.permissions
     assert not employee.all_houses and bot_catalog.name == "Тестовая УК"
     assert await db_session.scalar(select(func.count()).select_from(House)) == 1
     with pytest.raises(ValueError, match="Catalog already exists"):
