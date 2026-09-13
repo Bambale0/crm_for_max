@@ -567,3 +567,38 @@ async def test_worker_delivers_public_resident_reply(
         select(BotDelivery).where(BotDelivery.max_user_id == 306)
     )
     assert row and row.state == "sent"
+
+
+async def test_main_bot_filters_group_chatter_and_alerts_operator(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    bot_catalog: Organization,
+) -> None:
+    await send(client, event(101, text="/start"))
+    before = await db_session.scalar(
+        select(func.count()).select_from(BotDelivery).where(BotDelivery.max_user_id == 101)
+    )
+
+    await send(
+        client,
+        event(999, text="Кто сегодня смотрел футбол?", chat_type="chat", chat_id=-700),
+    )
+    after_chatter = await db_session.scalar(
+        select(func.count()).select_from(BotDelivery).where(BotDelivery.max_user_id == 101)
+    )
+    assert after_chatter == before
+
+    await send(
+        client,
+        event(
+            999,
+            text="Опять течёт труба в подъезде, вода уже на полу",
+            chat_type="chat",
+            chat_id=-700,
+        ),
+    )
+    signal = await latest_text(db_session, 101)
+    assert "Сигнал из чата" in signal
+    assert "MAX ID: 999" in signal
+    assert "течёт труба" in signal
+    assert await db_session.scalar(select(func.count()).select_from(ServiceRequest)) == 0
