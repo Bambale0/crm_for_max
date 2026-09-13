@@ -1,4 +1,4 @@
-"""Env-authorized provider identities, independent of browser sessions."""
+"""MAX identities for staff and residents, independent of browser sessions."""
 
 import hashlib
 import json
@@ -14,11 +14,13 @@ from app.models.crm import Employee, Role
 from app.models.identity import AuditLog, User
 
 
-async def native_actor(
-    db: AsyncSession, settings: Settings, max_user_id: int, display_name: str | None = None
+async def _load_actor(
+    db: AsyncSession,
+    max_user_id: int,
+    display_name: str | None,
+    *,
+    is_owner: bool,
 ) -> Actor:
-    if max_user_id not in (*settings.max_owner_ids, *settings.max_employee_ids):
-        raise InvalidCredentials
     if display_name is not None:
         created = await db.scalar(
             insert(User)
@@ -37,6 +39,22 @@ async def native_actor(
         raise InvalidCredentials
     if display_name is not None:
         user.display_name = display_name
+    return Actor(user=user, is_owner=is_owner)
+
+
+async def native_actor(
+    db: AsyncSession, settings: Settings, max_user_id: int, display_name: str | None = None
+) -> Actor:
+    """Load an env-authorized owner/employee for privileged bot actions."""
+    if max_user_id not in (*settings.max_owner_ids, *settings.max_employee_ids):
+        raise InvalidCredentials
+    actor = await _load_actor(
+        db,
+        max_user_id,
+        display_name,
+        is_owner=max_user_id in settings.max_owner_ids,
+    )
+    if display_name is not None:
         employees = await db.scalars(
             select(Employee).where(
                 Employee.max_user_id == max_user_id,
@@ -45,7 +63,26 @@ async def native_actor(
         )
         for employee in employees:
             employee.display_name = display_name
-    return Actor(user=user, is_owner=max_user_id in settings.max_owner_ids)
+    return actor
+
+
+async def resident_actor(
+    db: AsyncSession, settings: Settings, max_user_id: int, display_name: str | None = None
+) -> Actor:
+    """Load or create a public bot user without granting any CRM staff access.
+
+    A persisted Employee row never falls back to resident mode. This keeps an
+    employee whose env access was revoked from receiving queued staff content
+    through the public flow.
+    """
+    if max_user_id in (*settings.max_owner_ids, *settings.max_employee_ids):
+        raise InvalidCredentials
+    employee_id = await db.scalar(
+        select(Employee.id).where(Employee.max_user_id == max_user_id).limit(1)
+    )
+    if employee_id is not None:
+        raise InvalidCredentials
+    return await _load_actor(db, max_user_id, display_name, is_owner=False)
 
 
 async def access_stamp(db: AsyncSession, actor: ActorContext) -> str:
