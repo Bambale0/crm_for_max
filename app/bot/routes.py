@@ -12,7 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.dependencies import get_db, get_settings
 from app.auth.service import InvalidCredentials
 from app.bot.dialogs import conversation, handle_staff, menu, reply
-from app.bot.identity import native_actor
+from app.bot.identity import native_actor, resident_actor
+from app.bot.resident import handle_resident, resident_menu
 from app.bot.updates import normalize_update
 from app.core.config import Settings
 from app.crm.errors import CRMConflict, CRMError
@@ -61,6 +62,7 @@ async def max_webhook(
         binding = await db.get(HouseChat, update.chat_id)
         if binding is None:
             return {"ok": True}
+
     receipt = await db.scalar(
         insert(BotReceipt)
         .values(event_key=update.event_key)
@@ -70,6 +72,7 @@ async def max_webhook(
     if receipt is None:
         await db.commit()
         return {"ok": True}
+
     if namespace == "observer":
         assert update.text is not None
         db.add(
@@ -81,39 +84,62 @@ async def max_webhook(
             )
         )
     else:
+        is_staff = True
         try:
             actor = await native_actor(db, settings, update.actor_id, update.actor_name)
         except InvalidCredentials:
-            await db.commit()
-            return {"ok": True}
+            is_staff = False
+            try:
+                actor = await resident_actor(db, settings, update.actor_id, update.actor_name)
+            except InvalidCredentials:
+                await db.commit()
+                return {"ok": True}
+
         state = await conversation(db, update)
         if update.callback_id:
             await reply(db, actor, "", callback_id=update.callback_id)
+
+        buttons = menu(actor.is_owner) if is_staff else resident_menu()
         if update.timestamp_ms >= state.last_timestamp_ms:
             state.last_timestamp_ms = update.timestamp_ms
             try:
                 async with db.begin_nested():
-                    await handle_staff(db, settings, update, actor, state)
+                    if is_staff:
+                        await handle_staff(db, settings, update, actor, state)
+                    else:
+                        await handle_resident(db, settings, update, actor, state)
             except CRMConflict:
                 await reply(
                     db,
                     actor,
-                    "Заявка или диалог уже изменились. Откройте актуальную карточку из списка.",
-                    menu(actor.is_owner),
+                    (
+                        "Заявка или диалог уже изменились. Откройте актуальную карточку из списка."
+                        if is_staff
+                        else "Форма уже изменилась. Откройте меню и начните заново."
+                    ),
+                    buttons,
                 )
             except (CRMError, ValueError, KeyError, ValidationError):
                 await reply(
                     db,
                     actor,
-                    "Действие недоступно. Проверьте права или откройте заявку заново.",
-                    menu(actor.is_owner),
+                    (
+                        "Действие недоступно. Проверьте права или откройте заявку заново."
+                        if is_staff
+                        else "Не удалось выполнить действие. Откройте меню и попробуйте ещё раз."
+                    ),
+                    buttons,
                 )
         else:
             await reply(
                 db,
                 actor,
-                "Пришло старое сообщение. Откройте актуальную карточку из списка.",
-                menu(actor.is_owner),
+                (
+                    "Пришло старое сообщение. Откройте актуальную карточку из списка."
+                    if is_staff
+                    else "Это сообщение уже неактуально. Откройте меню."
+                ),
+                buttons,
             )
     await db.commit()
     return {"ok": True}
