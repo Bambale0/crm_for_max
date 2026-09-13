@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.schema import CreateSchema
 
 from app.api.dependencies import get_db
-from app.bot.dialogs import reply
+from app.bot.ui import reply
 from app.bot.identity import native_actor, resident_actor
 from app.bot.setup import bind_chat, initialize
 from app.bot.worker import deliver_one
@@ -25,7 +25,14 @@ from app.core.config import Settings
 from app.integrations.max.messaging import MaxMessagingClient
 from app.main import create_app
 from app.models.base import Base
-from app.models.bot import BotConversation, BotDelivery, BotReceipt, ChatObservation
+from app.models.bot import (
+    BotConversation,
+    BotDelivery,
+    BotGroupChat,
+    BotOrganizationSettings,
+    BotReceipt,
+    ChatObservation,
+)
 from app.models.crm import (
     Category,
     Employee,
@@ -312,7 +319,7 @@ async def test_outgoing_delivery_once(
     assert row.text == "" and row.buttons is None
 
 
-@pytest.mark.parametrize("revocation", ["env", "scope"])
+@pytest.mark.parametrize("revocation", ["membership", "scope"])
 async def test_queued_private_content_rechecks_current_access(
     db_session: AsyncSession,
     test_settings: Settings,
@@ -321,11 +328,11 @@ async def test_queued_private_content_rechecks_current_access(
 ) -> None:
     actor = await native_actor(db_session, test_settings, 202, "Исполнитель")
     await reply(db_session, actor, "Приватная карточка")
-    if revocation == "env":
-        test_settings.max_employee_ids = ()
+    employee = await db_session.scalar(select(Employee).where(Employee.max_user_id == 202))
+    assert employee
+    if revocation == "membership":
+        employee.is_active = False
     else:
-        employee = await db_session.scalar(select(Employee).where(Employee.max_user_id == 202))
-        assert employee
         employee.all_houses = False
     await db_session.commit()
 
@@ -348,6 +355,7 @@ async def test_setup_is_repeatable_and_preserves_employee_scopes(
     employee = await db_session.scalar(select(Employee).where(Employee.max_user_id == 202))
     assert employee
     employee.all_houses = False
+    original_role_id = employee.role_id
     test_settings.max_operator_ids = (*test_settings.max_operator_ids, 202)
     test_settings.max_employee_ids = ()
     await initialize(
@@ -355,8 +363,9 @@ async def test_setup_is_repeatable_and_preserves_employee_scopes(
     )
     await db_session.refresh(employee)
     role = await db_session.get(Role, employee.role_id)
-    assert role is not None and role.name == "Оператор"
-    assert "requests.assign" in role.permissions
+    assert employee.role_id == original_role_id
+    assert role is not None and role.name == "Сотрудник бота"
+    assert "requests.assign" not in role.permissions
     assert not employee.all_houses and bot_catalog.name == "Тестовая УК"
     assert await db_session.scalar(select(func.count()).select_from(House)) == 1
     with pytest.raises(ValueError, match="Catalog already exists"):
@@ -696,3 +705,178 @@ async def test_operator_dispatcher_menu_assignment_and_executor_isolation(
     )
     assert denied_delivery and denied_delivery.buttons
     assert [item["text"] for row in denied_delivery.buttons for item in row] == ["Мои задания"]
+
+
+async def test_owner_manages_staff_roles_inside_bot(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    bot_catalog: Organization,
+) -> None:
+    await send(client, event(101, text="/start"))
+    owner_menu = await db_session.scalar(
+        select(BotDelivery)
+        .where(BotDelivery.max_user_id == 101, BotDelivery.callback_id.is_(None))
+        .order_by(BotDelivery.sequence.desc())
+        .limit(1)
+    )
+    assert owner_menu and owner_menu.buttons
+    assert "Управление" in [item["text"] for row in owner_menu.buttons for item in row]
+
+    await send(client, event(404, text="/start"))
+    operator_menu = await db_session.scalar(
+        select(BotDelivery)
+        .where(BotDelivery.max_user_id == 404, BotDelivery.callback_id.is_(None))
+        .order_by(BotDelivery.sequence.desc())
+        .limit(1)
+    )
+    assert operator_menu and operator_menu.buttons
+    assert "Управление" not in [item["text"] for row in operator_menu.buttons for item in row]
+
+    await send(client, event(101, payload="admin"))
+    assert "Управление" in await latest_text(db_session, 101)
+    await send(client, event(101, payload="admin_staff_add"))
+    assert "MAX ID сотрудника" in await latest_text(db_session, 101)
+    await send(client, event(101, text="505"))
+    assert "Какую роль выдать" in await latest_text(db_session, 101)
+    await send(client, event(101, payload="admin_staff_add_role:executor"))
+
+    employee = await db_session.scalar(
+        select(Employee).where(
+            Employee.organization_id == bot_catalog.id,
+            Employee.max_user_id == 505,
+        )
+    )
+    assert employee is not None and employee.is_active
+    role = await db_session.get(Role, employee.role_id)
+    assert role is not None and role.name == "Сотрудник бота"
+
+    await send(client, event(505, text="/start"))
+    assert "Ваши задания" in await latest_text(db_session, 505)
+
+    await send(client, event(101, payload=f"admin_staff_role:{employee.id}:operator"))
+    await db_session.refresh(employee)
+    role = await db_session.get(Role, employee.role_id)
+    assert role is not None and role.name == "Оператор"
+
+    await send(client, event(505, text="/menu"))
+    assert "Диспетчерская" in await latest_text(db_session, 505)
+
+    before = await db_session.scalar(
+        select(func.count()).select_from(BotDelivery).where(BotDelivery.max_user_id == 505)
+    )
+    await send(client, event(101, payload=f"admin_staff_active:{employee.id}:0"))
+    await db_session.refresh(employee)
+    assert not employee.is_active
+
+    await send(client, event(505, text="/start"))
+    after = await db_session.scalar(
+        select(func.count()).select_from(BotDelivery).where(BotDelivery.max_user_id == 505)
+    )
+    assert after == before
+
+    owner_employee = await db_session.scalar(
+        select(Employee).where(
+            Employee.organization_id == bot_catalog.id,
+            Employee.max_user_id == 101,
+        )
+    )
+    assert owner_employee is not None
+    await send(client, event(101, payload=f"admin_staff_card:{owner_employee.id}"))
+    protected_card = await db_session.scalar(
+        select(BotDelivery)
+        .where(BotDelivery.max_user_id == 101, BotDelivery.callback_id.is_(None))
+        .order_by(BotDelivery.sequence.desc())
+        .limit(1)
+    )
+    assert protected_card and protected_card.buttons
+    labels = [item["text"] for row in protected_card.buttons for item in row]
+    assert "Сделать исполнителем" not in labels
+    assert "Отключить" not in labels
+
+
+async def test_owner_controls_group_chat_analysis(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    bot_catalog: Organization,
+    test_settings: Settings,
+) -> None:
+    await send(
+        client,
+        event(999, text="Обычный разговор без проблемы", chat_type="chat", chat_id=-800),
+    )
+    chat = await db_session.get(BotGroupChat, -800)
+    assert chat is not None
+    assert chat.organization_id == bot_catalog.id and chat.analysis_enabled
+
+    await send(client, event(101, payload="admin_chats:0"))
+    assert "Групповые чаты" in await latest_text(db_session, 101)
+
+    await send(client, event(101, payload="admin_chat_toggle:-800:0"))
+    await db_session.refresh(chat)
+    assert not chat.analysis_enabled
+
+    owner_before = await db_session.scalar(
+        select(func.count()).select_from(BotDelivery).where(BotDelivery.max_user_id == 101)
+    )
+    operator_before = await db_session.scalar(
+        select(func.count()).select_from(BotDelivery).where(BotDelivery.max_user_id == 404)
+    )
+    await send(
+        client,
+        event(999, text="Течёт труба, затапливает этаж", chat_type="chat", chat_id=-800),
+    )
+    assert (
+        await db_session.scalar(
+            select(func.count()).select_from(BotDelivery).where(BotDelivery.max_user_id == 101)
+        )
+        == owner_before
+    )
+    assert (
+        await db_session.scalar(
+            select(func.count()).select_from(BotDelivery).where(BotDelivery.max_user_id == 404)
+        )
+        == operator_before
+    )
+
+    await send(client, event(101, payload="admin_settings_group:0"))
+    bot_settings = await db_session.get(BotOrganizationSettings, bot_catalog.id)
+    assert bot_settings is not None and not bot_settings.group_analysis_enabled
+
+    owner_before = await db_session.scalar(
+        select(func.count()).select_from(BotDelivery).where(BotDelivery.max_user_id == 101)
+    )
+    await send(
+        client,
+        event(999, text="Нет воды и прорвало стояк", chat_type="chat", chat_id=-801),
+    )
+    second_chat = await db_session.get(BotGroupChat, -801)
+    assert second_chat is not None and second_chat.analysis_enabled
+    assert (
+        await db_session.scalar(
+            select(func.count()).select_from(BotDelivery).where(BotDelivery.max_user_id == 101)
+        )
+        == owner_before
+    )
+
+    await send(client, event(101, payload="admin_settings"))
+    settings_text = await latest_text(db_session, 101)
+    assert "Токены и секреты меняются только на сервере" in settings_text
+    assert test_settings.max_staff_token is not None
+    assert test_settings.max_staff_token.get_secret_value() not in settings_text
+
+
+async def test_non_owner_cannot_open_owner_admin(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    bot_catalog: Organization,
+) -> None:
+    await send(client, event(404, payload="admin"))
+    assert "Действие недоступно" in await latest_text(db_session, 404)
+    delivery = await db_session.scalar(
+        select(BotDelivery)
+        .where(BotDelivery.max_user_id == 404, BotDelivery.callback_id.is_(None))
+        .order_by(BotDelivery.sequence.desc())
+        .limit(1)
+    )
+    assert delivery and delivery.buttons
+    assert "Управление" not in [item["text"] for row in delivery.buttons for item in row]
