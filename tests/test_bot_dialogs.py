@@ -26,7 +26,15 @@ from app.integrations.max.messaging import MaxMessagingClient
 from app.main import create_app
 from app.models.base import Base
 from app.models.bot import BotConversation, BotDelivery, BotReceipt, ChatObservation
-from app.models.crm import Category, Employee, House, Organization, RequestStatus, Role, ServiceRequest
+from app.models.crm import (
+    Category,
+    Employee,
+    House,
+    Organization,
+    RequestStatus,
+    Role,
+    ServiceRequest,
+)
 from app.models.task_progress import TaskProgress
 
 pytestmark = pytest.mark.integration
