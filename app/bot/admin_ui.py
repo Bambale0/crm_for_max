@@ -97,9 +97,8 @@ async def _chat_card(
     organization_id: UUID,
     chat_id: int,
 ) -> None:
-    chats = await list_group_chats(db, organization_id, offset=0, limit=100)
-    chat = next((item for item in chats if item.chat_id == chat_id), None)
-    if chat is None:
+    chat = await db.get(BotGroupChat, chat_id, populate_existing=True)
+    if chat is None or chat.organization_id != organization_id:
         raise CRMInvalidReference
     await reply(
         db,
