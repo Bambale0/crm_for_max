@@ -3,7 +3,7 @@
 from collections.abc import Collection
 from uuid import UUID, uuid4
 
-from sqlalchemy import and_, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,6 +27,88 @@ PROGRESS_STATES = {
     "not_done": "Не выполнено",
     "needs": "Для выполнения нужно",
 }
+
+DISPATCH_QUEUES = {
+    "new": "Новые",
+    "unassigned": "Без исполнителя",
+    "in_progress": "В работе",
+    "attention": "Требуют внимания",
+    "all": "Все заявки",
+}
+
+
+def _dispatch_condition(queue: str):
+    if queue == "new":
+        return RequestStatus.code == "new"
+    if queue == "unassigned":
+        return and_(ServiceRequest.assignee_id.is_(None), RequestStatus.code != "done")
+    if queue == "in_progress":
+        return RequestStatus.code == "in_progress"
+    if queue == "attention":
+        return RequestStatus.code.in_(("needs", "not_done"))
+    if queue == "all":
+        return None
+    raise CRMInvalidReference
+
+
+async def dispatcher_counts(
+    db: AsyncSession,
+    actor: ActorContext,
+    org_id: UUID,
+) -> dict[str, int]:
+    access = await load_access(db, actor, org_id, "requests.assign")
+    row = (
+        await db.execute(
+            select(
+                func.count().filter(RequestStatus.code == "new"),
+                func.count().filter(
+                    and_(ServiceRequest.assignee_id.is_(None), RequestStatus.code != "done")
+                ),
+                func.count().filter(RequestStatus.code == "in_progress"),
+                func.count().filter(RequestStatus.code.in_(("needs", "not_done"))),
+                func.count(),
+            )
+            .select_from(ServiceRequest)
+            .join(House, House.id == ServiceRequest.house_id)
+            .join(RequestStatus, RequestStatus.id == ServiceRequest.status_id)
+            .where(access.house_predicate(), access.category_predicate())
+        )
+    ).one()
+    return {
+        "new": int(row[0] or 0),
+        "unassigned": int(row[1] or 0),
+        "in_progress": int(row[2] or 0),
+        "attention": int(row[3] or 0),
+        "all": int(row[4] or 0),
+    }
+
+
+async def list_dispatch_tasks(
+    db: AsyncSession,
+    actor: ActorContext,
+    org_id: UUID,
+    queue: str,
+    *,
+    limit: int = 10,
+    offset: int = 0,
+) -> list[ServiceRequest]:
+    if not 1 <= limit <= 100 or not 0 <= offset <= 10_000:
+        raise CRMInvalidReference
+    condition = _dispatch_condition(queue)
+    access = await load_access(db, actor, org_id, "requests.assign")
+    statement = (
+        select(ServiceRequest)
+        .join(House, House.id == ServiceRequest.house_id)
+        .join(RequestStatus, RequestStatus.id == ServiceRequest.status_id)
+        .where(access.house_predicate(), access.category_predicate())
+        .order_by(ServiceRequest.created_at.desc(), ServiceRequest.number.desc())
+        .limit(limit)
+        .offset(offset)
+        .execution_options(populate_existing=True)
+    )
+    if condition is not None:
+        statement = statement.where(condition)
+    return list((await db.scalars(statement)).all())
 
 
 async def _visible_task(
