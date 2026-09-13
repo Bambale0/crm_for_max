@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     max_observer_webhook_secret: SecretStr | None = None
     max_bot_organization_id: UUID | None = None
     max_owner_ids: Annotated[tuple[int, ...], NoDecode] = ()
+    max_operator_ids: Annotated[tuple[int, ...], NoDecode] = ()
     max_employee_ids: Annotated[tuple[int, ...], NoDecode] = ()
     max_api_base_url: str = "https://platform-api2.max.ru"
     max_timeout_seconds: float = Field(default=10, gt=0, le=60)
@@ -59,7 +60,7 @@ class Settings(BaseSettings):
             raise ValueError("Staff and observer webhook secrets must differ")
         return self
 
-    @field_validator("max_owner_ids", "max_employee_ids", mode="before")
+    @field_validator("max_owner_ids", "max_operator_ids", "max_employee_ids", mode="before")
     @classmethod
     def parse_max_ids(cls, value: object) -> tuple[int, ...]:
         if isinstance(value, str):
@@ -76,6 +77,22 @@ class Settings(BaseSettings):
                 raise ValueError("MAX IDs must be positive signed 64-bit integers")
             result.append(item)
         return tuple(dict.fromkeys(result))
+
+    @model_validator(mode="after")
+    def distinct_staff_roles(self) -> Self:
+        if set(self.max_operator_ids) & set(self.max_employee_ids):
+            raise ValueError("MAX_OPERATOR_IDS and MAX_EMPLOYEE_IDS must not overlap")
+        return self
+
+    @property
+    def max_staff_ids(self) -> tuple[int, ...]:
+        return tuple(
+            dict.fromkeys((*self.max_owner_ids, *self.max_operator_ids, *self.max_employee_ids))
+        )
+
+    @property
+    def max_dispatcher_ids(self) -> tuple[int, ...]:
+        return tuple(dict.fromkeys((*self.max_owner_ids, *self.max_operator_ids)))
 
     @field_validator("database_url")
     @classmethod

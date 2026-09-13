@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import get_db, get_settings
 from app.auth.service import InvalidCredentials
-from app.bot.dialogs import conversation, handle_staff, menu, reply
+from app.bot.dialogs import conversation, handle_staff, reply, staff_menu
 from app.bot.identity import native_actor, resident_actor
 from app.bot.resident import handle_resident, resident_menu
 from app.bot.updates import normalize_update
@@ -57,7 +57,7 @@ async def notify_group_problem(
     max_user_id: int,
     problem: str,
 ) -> None:
-    for operator_id in settings.max_owner_ids:
+    for operator_id in settings.max_dispatcher_ids:
         try:
             operator = await native_actor(db, settings, operator_id)
         except InvalidCredentials:
@@ -152,7 +152,7 @@ async def max_webhook(
         if update.callback_id:
             await reply(db, actor, "", callback_id=update.callback_id)
 
-        buttons = menu(actor.is_owner) if is_staff else resident_menu()
+        buttons = staff_menu(settings, actor) if is_staff else resident_menu()
         if update.timestamp_ms >= state.last_timestamp_ms:
             state.last_timestamp_ms = update.timestamp_ms
             try:

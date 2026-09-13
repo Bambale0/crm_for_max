@@ -34,6 +34,7 @@ def test_settings() -> Settings:
         max_staff_token=SecretStr("synthetic-max-staff-token"),
         max_observer_token=None,
         max_owner_ids=(101,),
+        max_operator_ids=(404,),
         max_employee_ids=(202,),
     )
 

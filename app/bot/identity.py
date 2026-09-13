@@ -48,7 +48,7 @@ async def native_actor(
     db: AsyncSession, settings: Settings, max_user_id: int, display_name: str | None = None
 ) -> Actor:
     """Load an env-authorized owner/employee for privileged bot actions."""
-    if max_user_id not in (*settings.max_owner_ids, *settings.max_employee_ids):
+    if max_user_id not in settings.max_staff_ids:
         raise InvalidCredentials
     actor = await _load_actor(
         db,
@@ -78,7 +78,7 @@ async def resident_actor(
     employee whose env access was revoked from receiving queued staff content
     through the public flow.
     """
-    if max_user_id in (*settings.max_owner_ids, *settings.max_employee_ids):
+    if max_user_id in settings.max_staff_ids:
         raise InvalidCredentials
     employee_id = await db.scalar(
         select(Employee.id).where(Employee.max_user_id == max_user_id).limit(1)

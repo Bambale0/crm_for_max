@@ -6,11 +6,15 @@ from app.core.config import Settings
 
 def test_env_lists_and_redacted_secrets(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MAX_OWNER_IDS", "101, 102,101")
+    monkeypatch.setenv("MAX_OPERATOR_IDS", "303")
     monkeypatch.setenv("MAX_EMPLOYEE_IDS", "202")
     monkeypatch.setenv("MAX_STAFF_TOKEN", "synthetic-sensitive-token")
     settings = Settings(_env_file=None)
     assert settings.max_owner_ids == (101, 102)
+    assert settings.max_operator_ids == (303,)
     assert settings.max_employee_ids == (202,)
+    assert settings.max_staff_ids == (101, 102, 303, 202)
+    assert settings.max_dispatcher_ids == (101, 102, 303)
     assert "synthetic-sensitive-token" not in repr(settings)
 
 
@@ -47,3 +51,8 @@ def test_bot_namespaces_require_distinct_secrets() -> None:
             max_staff_webhook_secret=SecretStr("x" * 32),
             max_observer_webhook_secret=SecretStr("x" * 32),
         )
+
+
+def test_operator_and_employee_ids_cannot_overlap() -> None:
+    with pytest.raises(ValidationError, match="must not overlap"):
+        Settings(_env_file=None, max_operator_ids=(202,), max_employee_ids=(202,))

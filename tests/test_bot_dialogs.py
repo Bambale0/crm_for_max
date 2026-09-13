@@ -26,7 +26,15 @@ from app.integrations.max.messaging import MaxMessagingClient
 from app.main import create_app
 from app.models.base import Base
 from app.models.bot import BotConversation, BotDelivery, BotReceipt, ChatObservation
-from app.models.crm import Category, Employee, House, Organization, RequestStatus, ServiceRequest
+from app.models.crm import (
+    Category,
+    Employee,
+    House,
+    Organization,
+    RequestStatus,
+    Role,
+    ServiceRequest,
+)
 from app.models.task_progress import TaskProgress
 
 pytestmark = pytest.mark.integration
@@ -124,7 +132,7 @@ async def test_employee_work_cycle_and_legacy_api(
     await send(client, event(payload=f"assign:{task.id}:0:{employee.id}"))
     await db_session.refresh(task)
     assert task.assignee_id == employee.id and task.revision == 1
-    assert "Вам назначена" in await latest_text(db_session, 202)
+    assert "Вам назначено задание" in await latest_text(db_session, 202)
     await send(client, event(202, payload=f"progress:{task.id}:1:needs"))
     assert "Что нужно для выполнения" in await latest_text(db_session, 202)
     report = event(202, text="Нужна лестница и напарник")
@@ -340,9 +348,15 @@ async def test_setup_is_repeatable_and_preserves_employee_scopes(
     employee = await db_session.scalar(select(Employee).where(Employee.max_user_id == 202))
     assert employee
     employee.all_houses = False
+    test_settings.max_operator_ids = (*test_settings.max_operator_ids, 202)
+    test_settings.max_employee_ids = ()
     await initialize(
         db_session, test_settings, "Не переименовывать", ["Тестовый дом 1"], bot_catalog.id
     )
+    await db_session.refresh(employee)
+    role = await db_session.get(Role, employee.role_id)
+    assert role is not None and role.name == "Оператор"
+    assert "requests.assign" in role.permissions
     assert not employee.all_houses and bot_catalog.name == "Тестовая УК"
     assert await db_session.scalar(select(func.count()).select_from(House)) == 1
     with pytest.raises(ValueError, match="Catalog already exists"):
@@ -394,7 +408,15 @@ async def test_simultaneous_webhook_retries_commit_one_request(test_settings: Se
         async with factory() as verify:
             assert await verify.scalar(select(func.count()).select_from(ServiceRequest)) == 1
             assert await verify.scalar(select(func.count()).select_from(BotReceipt)) == 2
-            assert await verify.scalar(select(func.count()).select_from(BotDelivery)) == 2
+            assert await verify.scalar(select(func.count()).select_from(BotDelivery)) == 3
+            assert (
+                await verify.scalar(
+                    select(func.count())
+                    .select_from(BotDelivery)
+                    .where(BotDelivery.max_user_id == 404, BotDelivery.callback_id.is_(None))
+                )
+                == 1
+            )
     finally:
         # The isolated schema lives only in the disposable container; no DROP or shared cleanup.
         await engine.dispose()
@@ -502,6 +524,9 @@ async def test_resident_intake_confirmation_and_own_requests(
     assert "Новая заявка от жителя" in operator_card
     assert "MAX ID: 303" in operator_card
     assert "ул. Ленина, 12" in operator_card
+    dispatcher_card = await latest_text(db_session, 404)
+    assert "Новая заявка от жителя" in dispatcher_card
+    assert "MAX ID: 303" in dispatcher_card
 
     await send(client, event(resident_id, payload="resident_mine:0"))
     delivery = await db_session.scalar(
@@ -599,4 +624,75 @@ async def test_main_bot_filters_group_chatter_and_alerts_operator(
     assert "Сигнал из чата" in signal
     assert "MAX ID: 999" in signal
     assert "течёт труба" in signal
+    operator_signal = await latest_text(db_session, 404)
+    assert "Сигнал из чата" in operator_signal
+    assert "MAX ID: 999" in operator_signal
     assert await db_session.scalar(select(func.count()).select_from(ServiceRequest)) == 0
+
+
+async def test_operator_dispatcher_menu_assignment_and_executor_isolation(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    bot_catalog: Organization,
+) -> None:
+    await send(client, event(404, text="/start"))
+    operator_menu_text = await latest_text(db_session, 404)
+    assert "Диспетчерская" in operator_menu_text
+    assert "Новые: 0" in operator_menu_text
+    assert "Без исполнителя: 0" in operator_menu_text
+
+    await send(client, event(202, text="/start"))
+    assert "Ваши задания" in await latest_text(db_session, 202)
+    executor_delivery = await db_session.scalar(
+        select(BotDelivery)
+        .where(BotDelivery.max_user_id == 202, BotDelivery.callback_id.is_(None))
+        .order_by(BotDelivery.sequence.desc())
+        .limit(1)
+    )
+    assert executor_delivery and executor_delivery.buttons
+    assert [item["text"] for row in executor_delivery.buttons for item in row] == ["Мои задания"]
+
+    task = await create_task(client, db_session)
+    await send(client, event(404, text="/menu"))
+    operator_menu_text = await latest_text(db_session, 404)
+    assert "Новые: 1" in operator_menu_text
+    assert "Без исполнителя: 1" in operator_menu_text
+
+    await send(client, event(404, payload="dispatch:unassigned:0"))
+    queue_delivery = await db_session.scalar(
+        select(BotDelivery)
+        .where(BotDelivery.max_user_id == 404, BotDelivery.callback_id.is_(None))
+        .order_by(BotDelivery.sequence.desc())
+        .limit(1)
+    )
+    assert queue_delivery and queue_delivery.buttons
+    assert queue_delivery.buttons[0][0]["payload"] == f"task:{task.id}"
+
+    await send(client, event(404, payload="executors:0"))
+    roster = await latest_text(db_session, 404)
+    assert "Исполнители" in roster
+    assert "Сотрудник 202" in roster
+    assert "Сотрудник 404" not in roster
+
+    employee = await db_session.scalar(select(Employee).where(Employee.max_user_id == 202))
+    assert employee is not None
+    await send(client, event(404, payload=f"assign:{task.id}:0:{employee.id}"))
+    await db_session.refresh(task)
+    assert task.assignee_id == employee.id and task.revision == 1
+    assert "Исполнитель назначен" in await latest_text(db_session, 404)
+    assert "Вам назначено задание" in await latest_text(db_session, 202)
+
+    await send(client, event(404, text="/menu"))
+    operator_menu_text = await latest_text(db_session, 404)
+    assert "Без исполнителя: 0" in operator_menu_text
+
+    await send(client, event(202, payload="dispatch:all:0"))
+    assert "Действие недоступно" in await latest_text(db_session, 202)
+    denied_delivery = await db_session.scalar(
+        select(BotDelivery)
+        .where(BotDelivery.max_user_id == 202, BotDelivery.callback_id.is_(None))
+        .order_by(BotDelivery.sequence.desc())
+        .limit(1)
+    )
+    assert denied_delivery and denied_delivery.buttons
+    assert [item["text"] for row in denied_delivery.buttons for item in row] == ["Мои задания"]

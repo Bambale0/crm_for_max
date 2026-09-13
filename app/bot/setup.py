@@ -22,6 +22,14 @@ from app.models.crm import (
 )
 
 EMPLOYEE_PERMISSIONS = ["houses.view", "requests.view", "requests.create", "requests.update"]
+OPERATOR_PERMISSIONS = [
+    "houses.view",
+    "employees.view",
+    "requests.view",
+    "requests.create",
+    "requests.assign",
+    "requests.update",
+]
 
 
 async def initialize(
@@ -87,32 +95,62 @@ async def initialize(
         ):
             raise ValueError("Existing new status is not initial; configure the catalog first")
         db.add(RequestStatus(organization_id=org.id, name="Новая", code="new", is_initial=True))
-    role = await db.scalar(
+    employee_role = await db.scalar(
         select(Role)
         .where(Role.organization_id == org.id, Role.name == "Сотрудник бота")
         .order_by(Role.id)
         .limit(1)
     )
-    if role is None:
-        role = Role(organization_id=org.id, name="Сотрудник бота", permissions=EMPLOYEE_PERMISSIONS)
-        db.add(role)
+    if employee_role is None:
+        employee_role = Role(
+            organization_id=org.id,
+            name="Сотрудник бота",
+            permissions=EMPLOYEE_PERMISSIONS,
+        )
+        db.add(employee_role)
         await db.flush()
-    for max_id in dict.fromkeys((*settings.max_owner_ids, *settings.max_employee_ids)):
-        if not await db.scalar(
-            select(Employee.id).where(
+
+    operator_role = await db.scalar(
+        select(Role)
+        .where(Role.organization_id == org.id, Role.name == "Оператор")
+        .order_by(Role.id)
+        .limit(1)
+    )
+    if operator_role is None:
+        operator_role = Role(
+            organization_id=org.id,
+            name="Оператор",
+            permissions=OPERATOR_PERMISSIONS,
+        )
+        db.add(operator_role)
+        await db.flush()
+
+    for max_id in settings.max_staff_ids:
+        target_role = operator_role if max_id in settings.max_dispatcher_ids else employee_role
+        employee = await db.scalar(
+            select(Employee).where(
                 Employee.organization_id == org.id, Employee.max_user_id == max_id
             )
-        ):
+        )
+        if employee is None:
             db.add(
                 Employee(
                     organization_id=org.id,
                     max_user_id=max_id,
                     display_name=f"MAX {max_id}",
-                    role_id=role.id,
+                    role_id=target_role.id,
                     all_houses=True,
                     all_categories=True,
                 )
             )
+            continue
+        current_role = await db.get(Role, employee.role_id)
+        if (
+            current_role is not None
+            and current_role.name in {"Сотрудник бота", "Оператор"}
+            and employee.role_id != target_role.id
+        ):
+            employee.role_id = target_role.id
     await db.flush()
     return org
 

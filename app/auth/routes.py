@@ -68,7 +68,7 @@ async def get_authenticated_session(
             db,
             credentials.credentials,
             owner_ids=settings.max_owner_ids,
-            employee_ids=settings.max_employee_ids,
+            employee_ids=(*settings.max_operator_ids, *settings.max_employee_ids),
         )
     except service.InvalidCredentials:
         raise _unauthorized() from None
@@ -93,7 +93,7 @@ async def login(
     settings: SettingsDependency,
 ) -> LoginResponse:
     if settings.max_staff_token is None or not (
-        settings.max_owner_ids or settings.max_employee_ids
+        settings.max_owner_ids or settings.max_operator_ids or settings.max_employee_ids
     ):
         raise _unavailable()
     try:
@@ -110,7 +110,7 @@ async def login(
             ttl_seconds=settings.max_init_data_ttl_seconds,
             future_skew_seconds=settings.max_init_data_future_skew_seconds,
         )
-        if identity.max_user_id not in (*settings.max_owner_ids, *settings.max_employee_ids):
+        if identity.max_user_id not in settings.max_staff_ids:
             raise _unauthorized()
         await check_login_budget(
             redis,
@@ -131,7 +131,7 @@ async def login(
             identity=identity,
             ttl_seconds=settings.session_ttl_seconds,
             owner_ids=settings.max_owner_ids,
-            employee_ids=settings.max_employee_ids,
+            employee_ids=(*settings.max_operator_ids, *settings.max_employee_ids),
         )
     except LoginRateLimited as error:
         raise HTTPException(
