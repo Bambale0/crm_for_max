@@ -9,7 +9,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.actor import Actor
 from app.auth.service import InvalidCredentials
-from app.bot.identity import access_stamp, native_actor
+from app.bot.admin import EXECUTOR_ROLE_NAME, dispatcher_max_ids, staff_is_dispatcher
+from app.bot.admin_ui import handle_owner_admin
+from app.bot.identity import native_actor
+from app.bot.ui import Buttons, button, reply
 from app.bot.updates import IncomingUpdate
 from app.core.config import Settings
 from app.crm.access import access_from_membership, load_access
@@ -26,25 +29,20 @@ from app.crm.task_workflow import (
     report_progress,
     visible_task,
 )
-from app.models.bot import BotConversation, BotDelivery, ChatObservation, HouseChat
+from app.models.bot import BotConversation, ChatObservation, HouseChat
 from app.models.crm import Category, Employee, House, RequestStatus, Role, ServiceRequest
 from app.models.identity import User
 from app.models.task_progress import TaskProgress
 
 PAGE_SIZE = 8
-Buttons = list[list[dict[str, str]]]
-
-
-def button(text: str, payload: str) -> dict[str, str]:
-    return {"text": text[:128], "payload": payload}
 
 
 def executor_menu() -> Buttons:
     return [[button("Мои задания", "list:mine:0")]]
 
 
-def dispatcher_menu() -> Buttons:
-    return [
+def dispatcher_menu(is_owner: bool = False) -> Buttons:
+    rows: Buttons = [
         [button("Новые", "dispatch:new:0"), button("Без исполнителя", "dispatch:unassigned:0")],
         [
             button("В работе", "dispatch:in_progress:0"),
@@ -53,36 +51,20 @@ def dispatcher_menu() -> Buttons:
         [button("Все заявки", "dispatch:all:0"), button("Исполнители", "executors:0")],
         [button("Создать заявку", "new")],
     ]
+    if is_owner:
+        rows.append([button("Управление", "admin")])
+    return rows
 
 
 def menu(is_owner: bool = False) -> Buttons:
-    return dispatcher_menu() if is_owner else executor_menu()
+    return dispatcher_menu(is_owner=True) if is_owner else executor_menu()
 
 
-def is_dispatcher(settings: Settings, actor: Actor) -> bool:
-    return actor.is_owner or actor.user.max_user_id in settings.max_operator_ids
-
-
-def staff_menu(settings: Settings, actor: Actor) -> Buttons:
-    return dispatcher_menu() if is_dispatcher(settings, actor) else executor_menu()
-
-
-async def reply(
-    db: AsyncSession,
-    actor: Actor,
-    text: str,
-    buttons: Buttons | None = None,
-    *,
-    callback_id: str | None = None,
-) -> None:
-    db.add(
-        BotDelivery(
-            max_user_id=actor.user.max_user_id,
-            access_stamp=await access_stamp(db, actor),
-            text=text[:4000],
-            buttons=buttons,
-            callback_id=callback_id,
-        )
+async def staff_menu(db: AsyncSession, actor: Actor, org_id: UUID) -> Buttons:
+    return (
+        dispatcher_menu(is_owner=actor.is_owner)
+        if await staff_is_dispatcher(db, actor, org_id)
+        else executor_menu()
     )
 
 
@@ -92,7 +74,7 @@ async def show_staff_menu(
     actor: Actor,
     org_id: UUID,
 ) -> None:
-    if is_dispatcher(settings, actor):
+    if await staff_is_dispatcher(db, actor, org_id):
         counts = await dispatcher_counts(db, actor, org_id)
         await reply(
             db,
@@ -107,7 +89,7 @@ async def show_staff_menu(
                     f"Всего заявок: {counts['all']}",
                 ]
             ),
-            dispatcher_menu(),
+            dispatcher_menu(is_owner=actor.is_owner),
         )
         return
     await reply(
@@ -218,7 +200,9 @@ async def notify_owners(
     exclude_id: int | None = None,
     prefix: str = "Сотрудник обновил заявку.",
 ) -> None:
-    for max_id in settings.max_dispatcher_ids:
+    for max_id in await dispatcher_max_ids(
+        db, task.organization_id, settings.max_owner_ids
+    ):
         if max_id == exclude_id:
             continue
         try:
@@ -428,7 +412,7 @@ async def handle_staff(
     if org_id is None:
         await reply(db, actor, "Бот ещё не настроен. Руководитель завершит настройку при запуске.")
         return
-    dispatcher = is_dispatcher(settings, actor)
+    dispatcher = await staff_is_dispatcher(db, actor, org_id)
     text = (update.text or "").strip() if update.update_type == "message_created" else ""
     payload = update.callback_payload or ""
     if update.update_type == "bot_started" or text.lower() in {"/start", "/help", "/menu"}:
@@ -442,6 +426,17 @@ async def handle_staff(
     if payload in {"menu", "cancel"}:
         state.state, state.data = "menu", {}
         await show_staff_menu(db, settings, actor, org_id)
+        return
+    if await handle_owner_admin(
+        db,
+        settings,
+        update,
+        actor,
+        state,
+        org_id,
+        payload,
+        text,
+    ):
         return
     if payload == "new":
         if not dispatcher:
@@ -534,10 +529,15 @@ async def handle_staff(
         executors = list(
             await db.scalars(
                 select(Employee)
+                .join(
+                    Role,
+                    (Role.id == Employee.role_id)
+                    & (Role.organization_id == Employee.organization_id),
+                )
                 .where(
                     Employee.organization_id == org_id,
                     Employee.is_active.is_(True),
-                    Employee.max_user_id.in_(settings.max_employee_ids),
+                    Role.name == EXECUTOR_ROLE_NAME,
                 )
                 .order_by(Employee.display_name, Employee.id)
                 .offset(offset)
@@ -590,7 +590,6 @@ async def handle_staff(
             raise CRMConflict
         house = await db.get(House, task.house_id)
         assert house is not None
-        allowed = settings.max_employee_ids
         rows = []
         candidates = (
             await db.execute(
@@ -599,7 +598,7 @@ async def handle_staff(
                 .where(
                     Employee.organization_id == task.organization_id,
                     Employee.is_active.is_(True),
-                    Employee.max_user_id.in_(allowed),
+                    Role.name == EXECUTOR_ROLE_NAME,
                 )
                 .order_by(Employee.display_name, Employee.id)
             )
@@ -631,13 +630,28 @@ async def handle_staff(
         )
         return
     if action == "assign" and len(parts) == 4:
+        allowed_executor_ids = list(
+            await db.scalars(
+                select(Employee.max_user_id)
+                .join(
+                    Role,
+                    (Role.id == Employee.role_id)
+                    & (Role.organization_id == Employee.organization_id),
+                )
+                .where(
+                    Employee.organization_id == org_id,
+                    Employee.is_active.is_(True),
+                    Role.name == EXECUTOR_ROLE_NAME,
+                )
+            )
+        )
         task = await assign_request(
             db,
             actor,
             UUID(parts[1]),
             UUID(parts[3]),
             int(parts[2]),
-            settings.max_staff_ids,
+            allowed_executor_ids,
         )
         employee = await db.get(Employee, task.assignee_id)
         assert employee is not None
@@ -716,5 +730,5 @@ async def handle_staff(
             if dispatcher
             else "Откройте «Мои задания» и выберите назначенную заявку."
         ),
-        staff_menu(settings, actor),
+        await staff_menu(db, actor, org_id),
     )
