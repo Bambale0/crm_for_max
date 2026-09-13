@@ -2,6 +2,7 @@
 services:
   postgres:
     image: postgres:17.11-bookworm
+    restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-crm}
       POSTGRES_DB: ${POSTGRES_DB:-crm}
@@ -17,6 +18,7 @@ services:
 
   redis:
     image: redis:7.4.11-bookworm
+    restart: unless-stopped
     command: ["redis-server", "--save", "", "--appendonly", "no"]
     tmpfs:
       - /data
@@ -28,6 +30,7 @@ services:
 
   api:
     build: .
+    restart: unless-stopped
     environment: &app-environment
       APP_ENV: development
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-crm}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-crm}

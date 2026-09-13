@@ -65,6 +65,10 @@ MAX указывает актуальный домен `platform-api2.max.ru` и
 [Требования MAX](https://dev.max.ru/docs-api/methods/GET/me),
 [настройка TLS HTTPX](https://www.python-httpx.org/advanced/ssl/).
 
+Docker-образ устанавливает `certificates/russian-trusted-root-ca.crt` в системное
+хранилище CA и направляет HTTPX на `/etc/ssl/certs/ca-certificates.crt`. Перед
+обновлением сертификата сверяйте его SHA-256 fingerprint с официальной публикацией.
+
 ## Интерпретация результата
 
 `stdout` содержит JSON с ID бота, булевыми признаками и разрешёнными названиями прав.

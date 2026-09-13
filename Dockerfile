@@ -12,8 +12,14 @@ RUN uv sync --frozen --no-dev --no-install-project
 FROM python:3.12.14-slim-bookworm AS runtime
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
+    SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt \
     PATH="/app/.venv/bin:$PATH"
-RUN useradd --system --user-group --uid 10001 --no-create-home app
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --system --user-group --uid 10001 --no-create-home app
+COPY certificates/russian-trusted-root-ca.crt /usr/local/share/ca-certificates/russian-trusted-root-ca.crt
+RUN update-ca-certificates
 WORKDIR /app
 COPY --from=dependencies /app/.venv /app/.venv
 COPY app ./app

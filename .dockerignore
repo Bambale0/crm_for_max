@@ -9,6 +9,8 @@
 !app/**
 !migrations/
 !migrations/**
+!certificates/
+!certificates/**
 **/__pycache__/
 **/*.py[cod]
 **/.env*
