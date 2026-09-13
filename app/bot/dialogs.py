@@ -202,7 +202,7 @@ async def task_card(
             ]
         )
     if "requests.assign" in access.permissions:
-        rows.append([button("Назначить сотрудника", f"assignees:{task.id}:{task.revision}:0")])
+        rows.append([button("Назначить исполнителя", f"assignees:{task.id}:{task.revision}:0")])
     rows.extend([[button("Обновить", f"task:{task.id}"), button("Меню", "menu")]])
     await reply(db, actor, "\n".join(line for line in lines if line), rows)
 
@@ -425,6 +425,7 @@ async def handle_staff(
     if org_id is None:
         await reply(db, actor, "Бот ещё не настроен. Руководитель завершит настройку при запуске.")
         return
+    dispatcher = is_dispatcher(settings, actor)
     text = (update.text or "").strip() if update.update_type == "message_created" else ""
     payload = update.callback_payload or ""
     if update.update_type == "bot_started" or text.lower() in {"/start", "/help", "/menu"}:
@@ -437,14 +438,18 @@ async def handle_staff(
         payload = "list:mine:0"
     if payload in {"menu", "cancel"}:
         state.state, state.data = "menu", {}
-        await reply(
-            db,
-            actor,
-            "Выберите действие. По заданию можно отметить результат или написать, что нужно.",
-            menu(actor.is_owner),
-        )
+        await show_staff_menu(db, settings, actor, org_id)
         return
     if payload == "new":
+        if not dispatcher:
+            state.state, state.data = "menu", {}
+            await reply(
+                db,
+                actor,
+                "Создавать и распределять заявки может оператор.",
+                executor_menu(),
+            )
+            return
         state.state, state.data = "house", {"flow": uuid4().hex}
         await select_house(db, actor, state, org_id)
         return
@@ -459,6 +464,8 @@ async def handle_staff(
         "dismiss",
         "assignees",
         "assign",
+        "dispatch",
+        "executors",
     }:
         state.state, state.data = "menu", {}
     if action in {"house", "houses", "category", "categories"} and len(parts) == 3:
@@ -494,6 +501,62 @@ async def handle_staff(
                 [[button("Отмена", "cancel")]],
             )
         return
+    if action == "dispatch" and len(parts) == 3 and parts[1] in DISPATCH_QUEUES:
+        offset = page(parts[2])
+        tasks = await list_dispatch_tasks(
+            db,
+            actor,
+            org_id,
+            parts[1],
+            limit=PAGE_SIZE + 1,
+            offset=offset,
+        )
+        rows = [
+            [button(f"№{task.number} · {task.description[:80]}", f"task:{task.id}")]
+            for task in tasks[:PAGE_SIZE]
+        ]
+        if len(tasks) > PAGE_SIZE:
+            rows.append(
+                [button("Дальше", f"dispatch:{parts[1]}:{offset + PAGE_SIZE}")]
+            )
+        rows.append([button("Меню", "menu")])
+        await reply(
+            db,
+            actor,
+            DISPATCH_QUEUES[parts[1]] if tasks else f"{DISPATCH_QUEUES[parts[1]]}: пусто.",
+            rows,
+        )
+        return
+    if action == "executors" and len(parts) == 2:
+        await load_access(db, actor, org_id, "requests.assign")
+        offset = page(parts[1])
+        executors = list(
+            await db.scalars(
+                select(Employee)
+                .where(
+                    Employee.organization_id == org_id,
+                    Employee.is_active.is_(True),
+                    Employee.max_user_id.in_(settings.max_employee_ids),
+                )
+                .order_by(Employee.display_name, Employee.id)
+                .offset(offset)
+                .limit(PAGE_SIZE + 1)
+            )
+        )
+        lines = ["Исполнители"] + [
+            f"• {employee.display_name}" for employee in executors[:PAGE_SIZE]
+        ]
+        rows: Buttons = []
+        if len(executors) > PAGE_SIZE:
+            rows.append([button("Дальше", f"executors:{offset + PAGE_SIZE}")])
+        rows.append([button("Меню", "menu")])
+        await reply(
+            db,
+            actor,
+            "\n".join(lines) if executors else "Активных исполнителей нет.",
+            rows,
+        )
+        return
     if action == "list" and len(parts) == 3 and parts[1] in {"mine", "all"}:
         if parts[1] == "all":
             await load_access(db, actor, org_id, "requests.assign")
@@ -526,7 +589,7 @@ async def handle_staff(
             raise CRMConflict
         house = await db.get(House, task.house_id)
         assert house is not None
-        allowed = (*settings.max_owner_ids, *settings.max_employee_ids)
+        allowed = settings.max_employee_ids
         rows = []
         candidates = (
             await db.execute(
@@ -573,12 +636,12 @@ async def handle_staff(
             UUID(parts[1]),
             UUID(parts[3]),
             int(parts[2]),
-            (*settings.max_owner_ids, *settings.max_employee_ids),
+            settings.max_staff_ids,
         )
         employee = await db.get(Employee, task.assignee_id)
         assert employee is not None
         recipient = await native_actor(db, settings, employee.max_user_id, employee.display_name)
-        await task_card(db, recipient, task, "Вам назначена заявка.")
+        await task_card(db, recipient, task, "Вам назначено задание.")
         await task_card(db, actor, task, "Исполнитель назначен.")
         return
     if action == "progress" and len(parts) == 4 and parts[3] in PROGRESS_STATES:
@@ -647,6 +710,10 @@ async def handle_staff(
     await reply(
         db,
         actor,
-        "Выберите действие кнопкой. Для нового обращения нажмите «Создать заявку».",
-        menu(actor.is_owner),
+        (
+            "Выберите раздел диспетчерской."
+            if dispatcher
+            else "Откройте «Мои задания» и выберите назначенную заявку."
+        ),
+        staff_menu(settings, actor),
     )
