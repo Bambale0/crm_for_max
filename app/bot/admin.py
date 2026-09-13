@@ -55,22 +55,21 @@ async def list_staff(
 ) -> list[tuple[Employee, Role]]:
     if not 0 <= offset <= 10_000 or not 1 <= limit <= 100:
         raise CRMInvalidReference
-    return list(
-        (
-            await db.execute(
-                select(Employee, Role)
-                .join(
-                    Role,
-                    (Role.id == Employee.role_id)
-                    & (Role.organization_id == Employee.organization_id),
-                )
-                .where(Employee.organization_id == organization_id)
-                .order_by(Employee.is_active.desc(), Employee.display_name, Employee.id)
-                .offset(offset)
-                .limit(limit)
+    rows = (
+        await db.execute(
+            select(Employee, Role)
+            .join(
+                Role,
+                (Role.id == Employee.role_id)
+                & (Role.organization_id == Employee.organization_id),
             )
-        ).all()
-    )
+            .where(Employee.organization_id == organization_id)
+            .order_by(Employee.is_active.desc(), Employee.display_name, Employee.id)
+            .offset(offset)
+            .limit(limit)
+        )
+    ).all()
+    return [(employee, role) for employee, role in rows]
 
 
 async def get_staff(
