@@ -51,7 +51,7 @@ async def native_actor(
     actor = await _load_actor(
         db,
         max_user_id,
-        display_name,
+        display_name or f"MAX {max_user_id}",
         is_owner=max_user_id in settings.max_owner_ids,
     )
     if display_name is not None:
