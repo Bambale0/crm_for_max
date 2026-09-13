@@ -229,6 +229,7 @@ async def test_unconfigured_max_login_is_unavailable(
         test_settings.max_staff_token = None
     else:
         test_settings.max_owner_ids = ()
+        test_settings.max_operator_ids = ()
         test_settings.max_employee_ids = ()
     response = await client.post("/api/auth/max", json={"init_data": launch})
     assert response.status_code == 503
