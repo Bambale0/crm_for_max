@@ -66,11 +66,12 @@ class RequestRead(BaseModel):
     category_id: UUID
     status_id: UUID
     applicant_name: str | None
+    applicant_address: str | None
     applicant_phone: str | None
     apartment: str | None
     description: str
     priority: Priority
-    source: Literal["manual", "staff_bot", "chat"]
+    source: Literal["manual", "staff_bot", "chat", "resident_bot"]
     created_by: UUID
     created_at: datetime
 
