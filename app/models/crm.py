@@ -223,6 +223,7 @@ class ServiceRequest(Base):
     assignee_id: Mapped[UUID | None] = mapped_column()
     revision: Mapped[int] = mapped_column(default=0, server_default=text("0"))
     applicant_name: Mapped[str | None] = mapped_column(String(200))
+    applicant_address: Mapped[str | None] = mapped_column(String(500))
     applicant_phone: Mapped[str | None] = mapped_column(String(50))
     apartment: Mapped[str | None] = mapped_column(String(30))
     description: Mapped[str] = mapped_column(Text)

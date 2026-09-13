@@ -8,7 +8,7 @@ from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.service import InvalidCredentials
-from app.bot.identity import access_stamp, native_actor
+from app.bot.identity import access_stamp, native_actor, resident_actor
 from app.core.config import Settings
 from app.core.database import Database
 from app.core.logging import configure_logging
@@ -36,18 +36,25 @@ async def deliver_one(db: AsyncSession, settings: Settings, client: MaxMessaging
     delivery = await db.scalar(
         select(BotDelivery)
         .where(BotDelivery.state == "pending")
-        .order_by(BotDelivery.sequence)
+        # Callback acknowledgements should not sit behind ordinary outbound messages.
+        .order_by(BotDelivery.callback_id.is_(None), BotDelivery.sequence)
         .limit(1)
         .with_for_update(skip_locked=True)
     )
     if delivery is None:
         await db.commit()
         return False
+
+    actor = None
     try:
         actor = await native_actor(db, settings, delivery.max_user_id)
-        valid = delivery.access_stamp == await access_stamp(db, actor)
     except InvalidCredentials:
-        valid = False
+        try:
+            actor = await resident_actor(db, settings, delivery.max_user_id)
+        except InvalidCredentials:
+            pass
+    valid = actor is not None and delivery.access_stamp == await access_stamp(db, actor)
+
     if not valid or delivery.created_at < now - timedelta(minutes=30):
         delivery.state, delivery.error_code = (
             "discarded",
@@ -56,6 +63,7 @@ async def deliver_one(db: AsyncSession, settings: Settings, client: MaxMessaging
         delivery.text, delivery.buttons, delivery.callback_id = "", None, None
         await db.commit()
         return True
+
     delivery.state, delivery.attempted_at = "sending", now
     await db.commit()
     try:

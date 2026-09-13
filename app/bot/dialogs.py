@@ -25,6 +25,7 @@ from app.crm.task_workflow import (
 )
 from app.models.bot import BotConversation, BotDelivery, ChatObservation, HouseChat
 from app.models.crm import Category, Employee, House, RequestStatus, Role, ServiceRequest
+from app.models.identity import User
 from app.models.task_progress import TaskProgress
 
 PAGE_SIZE = 8
@@ -106,14 +107,28 @@ async def task_card(
             .limit(3)
         )
     )
-    lines = [
-        prefix,
-        f"Заявка №{task.number}",
-        house.address if house else "",
-        task.description[:1400],
-        f"Статус: {status.name if status else 'Новая'}",
-        f"Исполнитель: {assignee.display_name if assignee else 'не назначен'}",
-    ]
+    if task.source == "resident_bot":
+        creator = await db.get(User, task.created_by)
+        lines = [
+            prefix,
+            f"Заявка №{task.number}",
+            f"Имя: {task.applicant_name or '—'}",
+            f"Адрес: {task.applicant_address or '—'}",
+            f"Телефон: {task.applicant_phone or '—'}",
+            f"MAX ID: {creator.max_user_id if creator else '—'}",
+            f"Проблема: {task.description[:1400]}",
+            f"Статус: {status.name if status else 'Новая'}",
+            f"Исполнитель: {assignee.display_name if assignee else 'не назначен'}",
+        ]
+    else:
+        lines = [
+            prefix,
+            f"Заявка №{task.number}",
+            house.address if house else "",
+            task.description[:1400],
+            f"Статус: {status.name if status else 'Новая'}",
+            f"Исполнитель: {assignee.display_name if assignee else 'не назначен'}",
+        ]
     for report in reversed(reports):
         lines.append(
             PROGRESS_STATES.get(report.state, report.state)

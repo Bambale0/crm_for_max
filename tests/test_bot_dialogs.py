@@ -18,7 +18,7 @@ from sqlalchemy.schema import CreateSchema
 
 from app.api.dependencies import get_db
 from app.bot.dialogs import reply
-from app.bot.identity import native_actor
+from app.bot.identity import native_actor, resident_actor
 from app.bot.setup import bind_chat, initialize
 from app.bot.worker import deliver_one
 from app.core.config import Settings
@@ -188,7 +188,6 @@ async def test_unbound_chat_and_public_staff_actions_are_ignored(
     await send(client, event(text="/new", chat_type="chat"))
     await send(client, event(payload="new", chat_type="chat"))
     await send(client, event(999, text="авария", chat_type="chat", chat_id=-999), "observer")
-    await send(client, event(999, text="/start"))
     assert await db_session.scalar(select(func.count()).select_from(BotDelivery)) == 0
     assert await db_session.scalar(select(func.count()).select_from(ChatObservation)) == 0
 
@@ -457,3 +456,147 @@ async def test_selecting_card_cancels_pending_note(
     await send(client, event(payload=f"task:{task.id}"))
     await send(client, event(text="Этот текст уже не должен попасть в пояснение"))
     assert await db_session.scalar(select(func.count()).select_from(TaskProgress)) == 0
+
+
+async def test_resident_intake_confirmation_and_own_requests(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    bot_catalog: Organization,
+) -> None:
+    resident_id = 303
+    await send(client, event(resident_id, text="/start"))
+    assert "Что хотите сделать" in await latest_text(db_session, resident_id)
+
+    await send(client, event(resident_id, payload="resident_new"))
+    assert "Как вас зовут" in await latest_text(db_session, resident_id)
+    await send(client, event(resident_id, text="Анна Петровна"))
+    assert "полный адрес" in await latest_text(db_session, resident_id)
+    await send(client, event(resident_id, text="г. Тест, ул. Ленина, 12, кв. 45"))
+    assert "Что произошло" in await latest_text(db_session, resident_id)
+    await send(client, event(resident_id, text="Течёт труба под раковиной"))
+    assert "Телефон" in await latest_text(db_session, resident_id)
+    await send(client, event(resident_id, text="+7 999 123-45-67"))
+
+    confirmation = await latest_text(db_session, resident_id)
+    assert "Проверьте данные" in confirmation
+    assert "Анна Петровна" in confirmation
+    assert "ул. Ленина, 12" in confirmation
+    assert await db_session.scalar(select(func.count()).select_from(ServiceRequest)) == 0
+
+    state = await db_session.get(BotConversation, resident_id)
+    assert state and state.state == "resident_confirm"
+    flow = state.data["flow"]
+    await send(client, event(resident_id, payload=f"resident_confirm:{flow}"))
+
+    task = await db_session.scalar(
+        select(ServiceRequest).where(ServiceRequest.source == "resident_bot")
+    )
+    assert task is not None
+    assert task.applicant_name == "Анна Петровна"
+    assert task.applicant_address == "г. Тест, ул. Ленина, 12, кв. 45"
+    assert task.applicant_phone == "+7 999 123-45-67"
+    assert task.description == "Течёт труба под раковиной"
+    assert "создана и передана оператору" in await latest_text(db_session, resident_id)
+
+    operator_card = await latest_text(db_session, 101)
+    assert "Новая заявка от жителя" in operator_card
+    assert "MAX ID: 303" in operator_card
+    assert "ул. Ленина, 12" in operator_card
+
+    await send(client, event(resident_id, payload="resident_mine:0"))
+    delivery = await db_session.scalar(
+        select(BotDelivery)
+        .where(BotDelivery.max_user_id == resident_id, BotDelivery.callback_id.is_(None))
+        .order_by(BotDelivery.sequence.desc())
+        .limit(1)
+    )
+    assert delivery and delivery.buttons
+    assert f"№{task.number} · Принята" in delivery.buttons[0][0]["text"]
+
+    await send(client, event(resident_id, payload=f"resident_task:{task.id}"))
+    card = await latest_text(db_session, resident_id)
+    assert f"Заявка №{task.number}" in card
+    assert "Статус: Принята" in card
+    assert "Течёт труба под раковиной" in card
+
+    other_id = 304
+    await send(client, event(other_id, text="/start"))
+    await send(client, event(other_id, payload=f"resident_task:{task.id}"))
+    assert "Заявка не найдена" in await latest_text(db_session, other_id)
+
+
+async def test_resident_can_cancel_before_request_creation(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    bot_catalog: Organization,
+) -> None:
+    resident_id = 305
+    await send(client, event(resident_id, payload="resident_new"))
+    await send(client, event(resident_id, text="Иван"))
+    await send(client, event(resident_id, text="Полный адрес 1"))
+    await send(client, event(resident_id, text="Что-то сломалось"))
+    await send(client, event(resident_id, text="+79990000000"))
+    state = await db_session.get(BotConversation, resident_id)
+    assert state and state.state == "resident_confirm"
+    await send(client, event(resident_id, payload=f"resident_cancel:{state.data['flow']}"))
+    assert "Заявка отменена" in await latest_text(db_session, resident_id)
+    assert await db_session.scalar(select(func.count()).select_from(ServiceRequest)) == 0
+
+
+async def test_worker_delivers_public_resident_reply(
+    db_session: AsyncSession,
+    test_settings: Settings,
+    bot_catalog: Organization,
+) -> None:
+    resident = await resident_actor(db_session, test_settings, 306, "Житель")
+    await reply(db_session, resident, "Ответ жителю")
+    await db_session.commit()
+    requests: list[httpx.Request] = []
+
+    def transport(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"message": {"body": {"mid": "resident-mid"}}})
+
+    async with MaxMessagingClient(
+        token=SecretStr("synthetic-token"), transport=httpx.MockTransport(transport)
+    ) as max_client:
+        assert await deliver_one(db_session, test_settings, max_client)
+
+    assert requests
+    row = await db_session.scalar(select(BotDelivery).where(BotDelivery.max_user_id == 306))
+    assert row and row.state == "sent"
+
+
+async def test_main_bot_filters_group_chatter_and_alerts_operator(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    bot_catalog: Organization,
+) -> None:
+    await send(client, event(101, text="/start"))
+    before = await db_session.scalar(
+        select(func.count()).select_from(BotDelivery).where(BotDelivery.max_user_id == 101)
+    )
+
+    await send(
+        client,
+        event(999, text="Кто сегодня смотрел футбол?", chat_type="chat", chat_id=-700),
+    )
+    after_chatter = await db_session.scalar(
+        select(func.count()).select_from(BotDelivery).where(BotDelivery.max_user_id == 101)
+    )
+    assert after_chatter == before
+
+    await send(
+        client,
+        event(
+            999,
+            text="Опять течёт труба в подъезде, вода уже на полу",
+            chat_type="chat",
+            chat_id=-700,
+        ),
+    )
+    signal = await latest_text(db_session, 101)
+    assert "Сигнал из чата" in signal
+    assert "MAX ID: 999" in signal
+    assert "течёт труба" in signal
+    assert await db_session.scalar(select(func.count()).select_from(ServiceRequest)) == 0
