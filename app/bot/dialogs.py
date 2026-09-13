@@ -519,9 +519,7 @@ async def handle_staff(
             for task in tasks[:PAGE_SIZE]
         ]
         if len(tasks) > PAGE_SIZE:
-            rows.append(
-                [button("Дальше", f"dispatch:{parts[1]}:{offset + PAGE_SIZE}")]
-            )
+            rows.append([button("Дальше", f"dispatch:{parts[1]}:{offset + PAGE_SIZE}")])
         rows.append([button("Меню", "menu")])
         await reply(
             db,
