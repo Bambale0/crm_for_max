@@ -210,8 +210,7 @@ async def dispatcher_max_ids(
             select(Employee, Role)
             .join(
                 Role,
-                (Role.id == Employee.role_id)
-                & (Role.organization_id == Employee.organization_id),
+                (Role.id == Employee.role_id) & (Role.organization_id == Employee.organization_id),
             )
             .where(
                 Employee.organization_id == organization_id,
