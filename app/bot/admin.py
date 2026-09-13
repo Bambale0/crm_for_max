@@ -83,8 +83,7 @@ async def get_staff(
             select(Employee, Role)
             .join(
                 Role,
-                (Role.id == Employee.role_id)
-                & (Role.organization_id == Employee.organization_id),
+                (Role.id == Employee.role_id) & (Role.organization_id == Employee.organization_id),
             )
             .where(
                 Employee.id == employee_id,
@@ -222,9 +221,7 @@ async def dispatcher_max_ids(
     ).all()
     result = list(owner_ids)
     result.extend(
-        employee.max_user_id
-        for employee, role in rows
-        if "requests.assign" in role.permissions
+        employee.max_user_id for employee, role in rows if "requests.assign" in role.permissions
     )
     return tuple(dict.fromkeys(result))
 
@@ -322,11 +319,7 @@ async def set_global_group_analysis(
         db.add(
             AuditLog(
                 actor_id=actor.user.id,
-                action=(
-                    "bot.group_analysis_enabled"
-                    if enabled
-                    else "bot.group_analysis_disabled"
-                ),
+                action=("bot.group_analysis_enabled" if enabled else "bot.group_analysis_disabled"),
                 target_type="bot_settings",
                 target_id=organization_id,
             )
