@@ -6,6 +6,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import and_, func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql.elements import ColumnElement
 
 from app.auth.actor import ActorContext
 from app.crm.access import access_from_membership, load_access
@@ -37,7 +38,7 @@ DISPATCH_QUEUES = {
 }
 
 
-def _dispatch_condition(queue: str):
+def _dispatch_condition(queue: str) -> ColumnElement[bool] | None:
     if queue == "new":
         return RequestStatus.code == "new"
     if queue == "unassigned":
