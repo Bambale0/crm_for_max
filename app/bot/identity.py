@@ -20,11 +20,13 @@ async def _load_actor(
     display_name: str | None,
     *,
     is_owner: bool,
+    create_if_missing: bool = False,
 ) -> Actor:
-    if display_name is not None:
+    create_name = display_name or (f"MAX {max_user_id}" if create_if_missing else None)
+    if create_name is not None:
         created = await db.scalar(
             insert(User)
-            .values(max_user_id=max_user_id, display_name=display_name)
+            .values(max_user_id=max_user_id, display_name=create_name)
             .on_conflict_do_nothing(index_elements=[User.max_user_id])
             .returning(User.id)
         )
@@ -51,8 +53,9 @@ async def native_actor(
     actor = await _load_actor(
         db,
         max_user_id,
-        display_name or f"MAX {max_user_id}",
+        display_name,
         is_owner=max_user_id in settings.max_owner_ids,
+        create_if_missing=True,
     )
     if display_name is not None:
         employees = await db.scalars(
