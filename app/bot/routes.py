@@ -66,9 +66,7 @@ async def notify_group_problem(
     organization_id = settings.max_bot_organization_id
     if organization_id is None:
         return
-    for operator_id in await dispatcher_max_ids(
-        db, organization_id, settings.max_owner_ids
-    ):
+    for operator_id in await dispatcher_max_ids(db, organization_id, settings.max_owner_ids):
         try:
             operator = await native_actor(db, settings, operator_id)
         except InvalidCredentials:
