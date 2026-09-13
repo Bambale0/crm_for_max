@@ -46,7 +46,10 @@ def executor_menu() -> Buttons:
 def dispatcher_menu() -> Buttons:
     return [
         [button("Новые", "dispatch:new:0"), button("Без исполнителя", "dispatch:unassigned:0")],
-        [button("В работе", "dispatch:in_progress:0"), button("Требуют внимания", "dispatch:attention:0")],
+        [
+            button("В работе", "dispatch:in_progress:0"),
+            button("Требуют внимания", "dispatch:attention:0"),
+        ],
         [button("Все заявки", "dispatch:all:0"), button("Исполнители", "executors:0")],
         [button("Создать заявку", "new")],
     ]
