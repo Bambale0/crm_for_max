@@ -408,7 +408,15 @@ async def test_simultaneous_webhook_retries_commit_one_request(test_settings: Se
         async with factory() as verify:
             assert await verify.scalar(select(func.count()).select_from(ServiceRequest)) == 1
             assert await verify.scalar(select(func.count()).select_from(BotReceipt)) == 2
-            assert await verify.scalar(select(func.count()).select_from(BotDelivery)) == 2
+            assert await verify.scalar(select(func.count()).select_from(BotDelivery)) == 3
+            assert (
+                await verify.scalar(
+                    select(func.count())
+                    .select_from(BotDelivery)
+                    .where(BotDelivery.max_user_id == 404, BotDelivery.callback_id.is_(None))
+                )
+                == 1
+            )
     finally:
         # The isolated schema lives only in the disposable container; no DROP or shared cleanup.
         await engine.dispose()
