@@ -17,8 +17,11 @@ from app.crm.errors import CRMConflict, CRMNotFound, CRMPermissionDenied
 from app.crm.request_schemas import RequestCreate
 from app.crm.requests import create_manual_request
 from app.crm.task_workflow import (
+    DISPATCH_QUEUES,
     PROGRESS_STATES,
     assign_request,
+    dispatcher_counts,
+    list_dispatch_tasks,
     list_tasks,
     report_progress,
     visible_task,
@@ -36,12 +39,29 @@ def button(text: str, payload: str) -> dict[str, str]:
     return {"text": text[:128], "payload": payload}
 
 
-def menu(is_owner: bool = False) -> Buttons:
+def executor_menu() -> Buttons:
+    return [[button("Мои задания", "list:mine:0")]]
+
+
+def dispatcher_menu() -> Buttons:
     return [
-        [button("Мои задания", "list:mine:0"), button("Создать заявку", "new")],
-        [button("Обращения из чатов", "inbox:0")],
-        *([[button("Все заявки", "list:all:0")]] if is_owner else []),
+        [button("Новые", "dispatch:new:0"), button("Без исполнителя", "dispatch:unassigned:0")],
+        [button("В работе", "dispatch:in_progress:0"), button("Требуют внимания", "dispatch:attention:0")],
+        [button("Все заявки", "dispatch:all:0"), button("Исполнители", "executors:0")],
+        [button("Создать заявку", "new")],
     ]
+
+
+def menu(is_owner: bool = False) -> Buttons:
+    return dispatcher_menu() if is_owner else executor_menu()
+
+
+def is_dispatcher(settings: Settings, actor: Actor) -> bool:
+    return actor.is_owner or actor.user.max_user_id in settings.max_operator_ids
+
+
+def staff_menu(settings: Settings, actor: Actor) -> Buttons:
+    return dispatcher_menu() if is_dispatcher(settings, actor) else executor_menu()
 
 
 async def reply(
@@ -60,6 +80,38 @@ async def reply(
             buttons=buttons,
             callback_id=callback_id,
         )
+    )
+
+
+async def show_staff_menu(
+    db: AsyncSession,
+    settings: Settings,
+    actor: Actor,
+    org_id: UUID,
+) -> None:
+    if is_dispatcher(settings, actor):
+        counts = await dispatcher_counts(db, actor, org_id)
+        await reply(
+            db,
+            actor,
+            "\n".join(
+                [
+                    "Диспетчерская",
+                    f"Новые: {counts['new']}",
+                    f"Без исполнителя: {counts['unassigned']}",
+                    f"В работе: {counts['in_progress']}",
+                    f"Требуют внимания: {counts['attention']}",
+                    f"Всего заявок: {counts['all']}",
+                ]
+            ),
+            dispatcher_menu(),
+        )
+        return
+    await reply(
+        db,
+        actor,
+        "Ваши задания. Откройте назначенную заявку, чтобы отметить результат.",
+        executor_menu(),
     )
 
 
@@ -163,7 +215,7 @@ async def notify_owners(
     exclude_id: int | None = None,
     prefix: str = "Сотрудник обновил заявку.",
 ) -> None:
-    for max_id in settings.max_owner_ids:
+    for max_id in settings.max_dispatcher_ids:
         if max_id == exclude_id:
             continue
         try:
