@@ -563,9 +563,7 @@ async def test_worker_delivers_public_resident_reply(
         assert await deliver_one(db_session, test_settings, max_client)
 
     assert requests
-    row = await db_session.scalar(
-        select(BotDelivery).where(BotDelivery.max_user_id == 306)
-    )
+    row = await db_session.scalar(select(BotDelivery).where(BotDelivery.max_user_id == 306))
     assert row and row.state == "sent"
 
 
