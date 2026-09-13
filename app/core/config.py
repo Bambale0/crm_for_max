@@ -78,6 +78,12 @@ class Settings(BaseSettings):
             result.append(item)
         return tuple(dict.fromkeys(result))
 
+    @model_validator(mode="after")
+    def distinct_staff_roles(self) -> Self:
+        if set(self.max_operator_ids) & set(self.max_employee_ids):
+            raise ValueError("MAX_OPERATOR_IDS and MAX_EMPLOYEE_IDS must not overlap")
+        return self
+
     @property
     def max_staff_ids(self) -> tuple[int, ...]:
         return tuple(
