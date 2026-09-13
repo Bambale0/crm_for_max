@@ -547,15 +547,15 @@ async def handle_staff(
         lines = ["Исполнители"] + [
             f"• {employee.display_name}" for employee in executors[:PAGE_SIZE]
         ]
-        rows: Buttons = []
+        executor_buttons: Buttons = []
         if len(executors) > PAGE_SIZE:
-            rows.append([button("Дальше", f"executors:{offset + PAGE_SIZE}")])
-        rows.append([button("Меню", "menu")])
+            executor_buttons.append([button("Дальше", f"executors:{offset + PAGE_SIZE}")])
+        executor_buttons.append([button("Меню", "menu")])
         await reply(
             db,
             actor,
             "\n".join(lines) if executors else "Активных исполнителей нет.",
-            rows,
+            executor_buttons,
         )
         return
     if action == "list" and len(parts) == 3 and parts[1] in {"mine", "all"}:
