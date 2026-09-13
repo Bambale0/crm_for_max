@@ -1,0 +1,39 @@
+# Local secrets and credentials
+.env
+.env.*
+!.env.example
+!.env.*.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Python environments and caches
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Frontend dependencies and generated output
+node_modules/
+dist/
+build/
+coverage/
+
+# Local runtime data and backups
+*.log
+*.sqlite
+*.sqlite3
+*.dump
+backups/
+
+# Editor and operating system files
+.idea/
+.DS_Store
+Thumbs.db
