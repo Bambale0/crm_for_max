@@ -325,10 +325,16 @@ async def handle_owner_admin(
             "\n".join(
                 [
                     "Настройки",
-                    f"Анализ групповых чатов: {'включён' if bot_settings.group_analysis_enabled else 'выключен'}",
+                    (
+                        "Анализ групповых чатов: "
+                        + ("включён" if bot_settings.group_analysis_enabled else "выключен")
+                    ),
                     "Фильтр сообщений: встроенные признаки проблемы",
                     f"MAX bot token: {'настроен' if settings.max_staff_token else 'не настроен'}",
-                    f"Webhook secret: {'настроен' if settings.max_staff_webhook_secret else 'не настроен'}",
+                    (
+                        "Webhook secret: "
+                        + ("настроен" if settings.max_staff_webhook_secret else "не настроен")
+                    ),
                     "",
                     "Токены и секреты меняются только на сервере и здесь не показываются.",
                 ]
