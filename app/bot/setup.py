@@ -126,31 +126,24 @@ async def initialize(
         await db.flush()
 
     for max_id in settings.max_staff_ids:
-        target_role = operator_role if max_id in settings.max_dispatcher_ids else employee_role
         employee = await db.scalar(
-            select(Employee).where(
+            select(Employee.id).where(
                 Employee.organization_id == org.id, Employee.max_user_id == max_id
             )
         )
-        if employee is None:
-            db.add(
-                Employee(
-                    organization_id=org.id,
-                    max_user_id=max_id,
-                    display_name=f"MAX {max_id}",
-                    role_id=target_role.id,
-                    all_houses=True,
-                    all_categories=True,
-                )
-            )
+        if employee is not None:
             continue
-        current_role = await db.get(Role, employee.role_id)
-        if (
-            current_role is not None
-            and current_role.name in {"Сотрудник бота", "Оператор"}
-            and employee.role_id != target_role.id
-        ):
-            employee.role_id = target_role.id
+        target_role = operator_role if max_id in settings.max_dispatcher_ids else employee_role
+        db.add(
+            Employee(
+                organization_id=org.id,
+                max_user_id=max_id,
+                display_name=f"MAX {max_id}",
+                role_id=target_role.id,
+                all_houses=True,
+                all_categories=True,
+            )
+        )
     await db.flush()
     return org
 
