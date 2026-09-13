@@ -49,10 +49,7 @@ async def _create_request(
     if organization_id is None:
         raise ValueError("Bot organization is not configured")
     house = await db.scalar(
-        select(House)
-        .where(House.organization_id == organization_id)
-        .order_by(House.id)
-        .limit(1)
+        select(House).where(House.organization_id == organization_id).order_by(House.id).limit(1)
     )
     category = await db.scalar(
         select(Category)
@@ -154,9 +151,7 @@ async def _show_my_requests(
     buttons: Buttons = []
     for task, status in rows[:PAGE_SIZE]:
         visible_status = RESIDENT_STATUS.get(status.code, status.name)
-        buttons.append(
-            [button(f"№{task.number} · {visible_status}", f"resident_task:{task.id}")]
-        )
+        buttons.append([button(f"№{task.number} · {visible_status}", f"resident_task:{task.id}")])
     if len(rows) > PAGE_SIZE:
         buttons.append([button("Дальше", f"resident_mine:{offset + PAGE_SIZE}")])
     buttons.append([button("Создать заявку", "resident_new")])
@@ -358,10 +353,12 @@ async def handle_resident(
                     f"Телефон: {state.data['phone']}",
                 ]
             )[:4000],
-            [[
-                button("Подтвердить", f"resident_confirm:{flow}"),
-                button("Отменить", f"resident_cancel:{flow}"),
-            ]],
+            [
+                [
+                    button("Подтвердить", f"resident_confirm:{flow}"),
+                    button("Отменить", f"resident_cancel:{flow}"),
+                ]
+            ],
         )
         return
 
