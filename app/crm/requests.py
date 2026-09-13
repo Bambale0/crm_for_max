@@ -11,8 +11,8 @@ from sqlalchemy import Select, or_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.actor import ActorContext
 from app.auth.routes import DatabaseDependency, SessionDependency
-from app.auth.service import AuthenticatedSession
 from app.crm.access import CRMAccess, load_access
 from app.crm.errors import CRMConflict, CRMInvalidReference, CRMNotFound, CRMPermissionDenied
 from app.crm.request_schemas import (
@@ -63,7 +63,7 @@ def _visible_requests(access: CRMAccess) -> Select[tuple[ServiceRequest, UUID]]:
 
 
 async def _visible_request(
-    db: AsyncSession, authenticated: AuthenticatedSession, request_id: UUID
+    db: AsyncSession, authenticated: ActorContext, request_id: UUID
 ) -> tuple[ServiceRequest, UUID]:
     organization_id = await db.scalar(
         select(ServiceRequest.organization_id).where(ServiceRequest.id == request_id)
@@ -85,9 +85,11 @@ async def _visible_request(
 
 async def create_manual_request(
     db: AsyncSession,
-    authenticated: AuthenticatedSession,
+    authenticated: ActorContext,
     payload: RequestCreate,
     idempotency_key: UUID,
+    *,
+    commit: bool = True,
 ) -> tuple[RequestRead, bool]:
     """Revalidate current scopes even for retries, then persist one request/history pair."""
     access = await load_access(db, authenticated, payload.organization_id, "requests.create")
@@ -180,7 +182,10 @@ async def create_manual_request(
             target_id=created.id,
         )
     )
-    await db.commit()
+    if commit:
+        await db.commit()
+    else:
+        await db.flush()
     return _view(created, house.area_id), True
 
 

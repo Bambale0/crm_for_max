@@ -28,12 +28,16 @@ services:
 
   api:
     build: .
-    environment:
+    environment: &app-environment
       APP_ENV: development
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-crm}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-crm}
       REDIS_URL: redis://redis:6379/0
       MAX_STAFF_TOKEN: ${MAX_STAFF_TOKEN:-}
       MAX_OBSERVER_TOKEN: ${MAX_OBSERVER_TOKEN:-}
+      MAX_STAFF_WEBHOOK_SECRET: ${MAX_STAFF_WEBHOOK_SECRET:-}
+      MAX_OBSERVER_WEBHOOK_SECRET: ${MAX_OBSERVER_WEBHOOK_SECRET:-}
+      MAX_BOT_ORGANIZATION_ID: ${MAX_BOT_ORGANIZATION_ID:-}
+      MAX_TIMEOUT_SECONDS: ${MAX_TIMEOUT_SECONDS:-10}
       MAX_OWNER_IDS: ${MAX_OWNER_IDS:-}
       MAX_EMPLOYEE_IDS: ${MAX_EMPLOYEE_IDS:-}
       MAX_INIT_DATA_TTL_SECONDS: ${MAX_INIT_DATA_TTL_SECONDS:-300}
@@ -48,6 +52,25 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  bot-worker:
+    profiles: [bot]
+    build: .
+    command: ["python", "-m", "app.bot.worker"]
+    environment: *app-environment
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      disable: true
     read_only: true
     tmpfs:
       - /tmp

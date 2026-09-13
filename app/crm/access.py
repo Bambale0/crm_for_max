@@ -7,7 +7,7 @@ from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
-from app.auth.service import AuthenticatedSession
+from app.auth.actor import ActorContext
 from app.crm.errors import CRMNotFound, CRMPermissionDenied
 from app.models.crm import Employee, House, Organization, Role, ServiceRequest
 
@@ -17,6 +17,8 @@ SUPPORTED_PERMISSIONS = frozenset(
         "employees.view",
         "requests.view",
         "requests.create",
+        "requests.assign",
+        "requests.update",
     }
 )
 
@@ -63,7 +65,7 @@ class CRMAccess:
 
 async def load_access(
     db: AsyncSession,
-    authenticated: AuthenticatedSession,
+    authenticated: ActorContext,
     organization_id: UUID,
     permission: str,
 ) -> CRMAccess:
@@ -104,6 +106,20 @@ async def load_access(
         # An existing foreign organization and a missing organization look identical.
         raise CRMNotFound
     employee, role = row
+    access = access_from_membership(employee, role)
+    if permission not in access.permissions:
+        raise CRMPermissionDenied
+    return access
+
+
+def access_from_membership(employee: Employee, role: Role) -> CRMAccess:
+    """Interpret an existing membership using the same fail-closed scope rules."""
+    if (
+        not employee.is_active
+        or employee.organization_id != role.organization_id
+        or employee.role_id != role.id
+    ):
+        raise CRMPermissionDenied
     try:
         permissions = frozenset(role.permissions) & SUPPORTED_PERMISSIONS
         house_ids = tuple(UUID(value) for value in employee.house_ids)
@@ -111,10 +127,8 @@ async def load_access(
     except (TypeError, ValueError, AttributeError):
         # Unexpected persisted scope data must fail closed, including manual DB edits.
         raise CRMPermissionDenied from None
-    if permission not in permissions:
-        raise CRMPermissionDenied
     return CRMAccess(
-        organization_id=organization_id,
+        organization_id=employee.organization_id,
         is_owner=False,
         permissions=permissions,
         area_id=employee.area_id,

@@ -70,7 +70,7 @@ class RequestRead(BaseModel):
     apartment: str | None
     description: str
     priority: Priority
-    source: Literal["manual"]
+    source: Literal["manual", "staff_bot", "chat"]
     created_by: UUID
     created_at: datetime
 
