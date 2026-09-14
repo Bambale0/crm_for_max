@@ -77,6 +77,25 @@ def urgent_fallback(text: str) -> GroupProblem | None:
     )
 
 
+def problem_from_deepseek_result(
+    text: str,
+    result: DeepSeekResult,
+    *,
+    min_confidence: float,
+) -> GroupProblem | None:
+    original = normalize_problem_text(text)
+    fallback = urgent_fallback(original)
+    if not result.is_problem or result.confidence < min_confidence:
+        return fallback
+    return GroupProblem(
+        problem=result.problem[:1000],
+        fingerprint=_fingerprint(original),
+        severity=result.severity,
+        source="deepseek",
+        confidence=result.confidence,
+    )
+
+
 async def classify_group_message(
     classifier: DeepSeekLike | None,
     text: str,
@@ -86,29 +105,17 @@ async def classify_group_message(
     original = normalize_problem_text(text)
     if len(_searchable(original)) < 4:
         return None
-
     if classifier is None:
         return urgent_fallback(original)
-
     try:
         result = await classifier.classify(original)
     except DeepSeekFailure as error:
         logger.warning("deepseek_group_classification_failed code=%s", error.code)
         return urgent_fallback(original)
-
-    fallback = urgent_fallback(original)
-    if not result.is_problem:
-        return fallback
-
-    if result.confidence < min_confidence:
-        return fallback
-
-    return GroupProblem(
-        problem=result.problem[:1000],
-        fingerprint=_fingerprint(original),
-        severity=result.severity,
-        source="deepseek",
-        confidence=result.confidence,
+    return problem_from_deepseek_result(
+        original,
+        result,
+        min_confidence=min_confidence,
     )
 
 
