@@ -12,7 +12,7 @@ from app.bot.dialogs import notify_owners
 from app.bot.ui import Buttons, button, reply
 from app.bot.updates import IncomingUpdate
 from app.core.config import Settings
-from app.crm.errors import CRMConflict, CRMError
+from app.crm.errors import CRMError
 from app.crm.task_workflow import resident_problem_remains
 from app.models.bot import BotConversation
 from app.models.crm import Category, House, RequestStatus, RequestStatusHistory, ServiceRequest
@@ -306,7 +306,10 @@ async def handle_resident(
             db,
             actor,
             f"Сообщили оператору по заявке №{task.number}, что проблема осталась.",
-            [[button("Открыть заявку", f"resident_task:{task.id}")], [button("Меню", "resident_menu")]],
+            [
+                [button("Открыть заявку", f"resident_task:{task.id}")],
+                [button("Меню", "resident_menu")],
+            ],
         )
         await notify_owners(
             db,
