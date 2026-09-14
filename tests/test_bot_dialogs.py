@@ -924,9 +924,7 @@ async def test_owner_controls_group_chat_analysis(
     await db_session.refresh(chat)
     assert not chat.analysis_enabled
     await drain_chat_analysis(db_session, test_settings, deepseek_classifier)
-    queued = await db_session.scalar(
-        select(ChatAnalysisJob).where(ChatAnalysisJob.chat_id == -800)
-    )
+    queued = await db_session.scalar(select(ChatAnalysisJob).where(ChatAnalysisJob.chat_id == -800))
     assert queued is not None and queued.state == "discarded" and queued.text == ""
 
     owner_before = await db_session.scalar(
