@@ -37,6 +37,11 @@ DISPATCH_QUEUES = {
     "all": "Все заявки",
 }
 
+OPERATOR_STATUS_NAMES = {
+    "closed": "Закрыта",
+    "resident_issue": "Проблема осталась",
+}
+
 
 def _dispatch_condition(queue: str) -> ColumnElement[bool] | None:
     if queue == "new":
@@ -46,7 +51,7 @@ def _dispatch_condition(queue: str) -> ColumnElement[bool] | None:
     if queue == "in_progress":
         return RequestStatus.code == "in_progress"
     if queue == "attention":
-        return RequestStatus.code.in_(("needs", "not_done"))
+        return RequestStatus.code.in_(("done", "needs", "not_done", "resident_issue"))
     if queue == "all":
         return None
     raise CRMInvalidReference
@@ -66,7 +71,9 @@ async def dispatcher_counts(
                     and_(ServiceRequest.assignee_id.is_(None), RequestStatus.code != "done")
                 ),
                 func.count().filter(RequestStatus.code == "in_progress"),
-                func.count().filter(RequestStatus.code.in_(("needs", "not_done"))),
+                func.count().filter(
+                    RequestStatus.code.in_(("done", "needs", "not_done", "resident_issue"))
+                ),
                 func.count(),
             )
             .select_from(ServiceRequest)
@@ -110,6 +117,48 @@ async def list_dispatch_tasks(
     if condition is not None:
         statement = statement.where(condition)
     return list((await db.scalars(statement)).all())
+
+
+async def _ensure_status_id(
+    db: AsyncSession,
+    organization_id: UUID,
+    code: str,
+    name: str,
+) -> UUID:
+    status_id = await db.scalar(
+        insert(RequestStatus)
+        .values(
+            id=uuid4(),
+            organization_id=organization_id,
+            code=code,
+            name=name,
+            is_initial=False,
+        )
+        .on_conflict_do_nothing(constraint="uq_request_statuses_code")
+        .returning(RequestStatus.id)
+    )
+    if status_id is None:
+        status_id = await db.scalar(
+            select(RequestStatus.id).where(
+                RequestStatus.organization_id == organization_id,
+                RequestStatus.code == code,
+            )
+        )
+    if status_id is None:
+        raise CRMConflict
+    return status_id
+
+
+async def _status_code(db: AsyncSession, task: ServiceRequest) -> str:
+    code = await db.scalar(
+        select(RequestStatus.code).where(
+            RequestStatus.id == task.status_id,
+            RequestStatus.organization_id == task.organization_id,
+        )
+    )
+    if code is None:
+        raise CRMConflict
+    return code
 
 
 async def _visible_task(
@@ -268,26 +317,12 @@ async def report_progress(
             raise CRMPermissionDenied
     if task.revision != expected_revision:
         raise CRMConflict
-    status_id = await db.scalar(
-        insert(RequestStatus)
-        .values(
-            id=uuid4(),
-            organization_id=task.organization_id,
-            code=state,
-            name=PROGRESS_STATES[state],
-            is_initial=False,
-        )
-        .on_conflict_do_nothing(constraint="uq_request_statuses_code")
-        .returning(RequestStatus.id)
+    status_id = await _ensure_status_id(
+        db,
+        task.organization_id,
+        state,
+        PROGRESS_STATES[state],
     )
-    if status_id is None:
-        status_id = await db.scalar(
-            select(RequestStatus.id).where(
-                RequestStatus.organization_id == task.organization_id, RequestStatus.code == state
-            )
-        )
-    if status_id is None:
-        raise CRMConflict
     if task.status_id != status_id:
         db.add(
             RequestStatusHistory(
@@ -311,6 +346,110 @@ async def report_progress(
                 target_id=task.id,
             ),
         ]
+    )
+    await db.flush()
+    return task
+
+
+async def operator_transition(
+    db: AsyncSession,
+    actor: ActorContext,
+    request_id: UUID,
+    action: str,
+    expected_revision: int,
+) -> ServiceRequest:
+    task = await _visible_task(db, actor, request_id, permission="requests.assign", lock=True)
+    if task.revision != expected_revision:
+        raise CRMConflict
+    current = await _status_code(db, task)
+
+    if action == "close":
+        if current != "done":
+            raise CRMInvalidReference
+        target_code = "closed"
+        target_name = OPERATOR_STATUS_NAMES[target_code]
+        audit_action = "request.closed"
+    elif action == "reopen":
+        if current not in {"done", "closed", "resident_issue", "needs", "not_done"}:
+            raise CRMInvalidReference
+        if task.assignee_id is None:
+            raise CRMInvalidReference
+        target_code = "in_progress"
+        target_name = PROGRESS_STATES[target_code]
+        audit_action = "request.reopened"
+    else:
+        raise CRMInvalidReference
+
+    status_id = await _ensure_status_id(db, task.organization_id, target_code, target_name)
+    if task.status_id != status_id:
+        db.add(
+            RequestStatusHistory(
+                request_id=task.id,
+                from_status_id=task.status_id,
+                to_status_id=status_id,
+                actor_id=actor.user.id,
+            )
+        )
+    task.status_id = status_id
+    task.revision += 1
+    db.add(
+        AuditLog(
+            actor_id=actor.user.id,
+            action=audit_action,
+            target_type="requests",
+            target_id=task.id,
+        )
+    )
+    await db.flush()
+    return task
+
+
+async def resident_problem_remains(
+    db: AsyncSession,
+    actor: ActorContext,
+    request_id: UUID,
+    expected_revision: int,
+) -> ServiceRequest:
+    task = await db.scalar(
+        select(ServiceRequest)
+        .where(
+            ServiceRequest.id == request_id,
+            ServiceRequest.created_by == actor.user.id,
+            ServiceRequest.source == "resident_bot",
+        )
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if task is None:
+        raise CRMNotFound
+    if task.revision != expected_revision:
+        raise CRMConflict
+    if await _status_code(db, task) != "closed":
+        raise CRMInvalidReference
+
+    status_id = await _ensure_status_id(
+        db,
+        task.organization_id,
+        "resident_issue",
+        OPERATOR_STATUS_NAMES["resident_issue"],
+    )
+    db.add(
+        RequestStatusHistory(
+            request_id=task.id,
+            from_status_id=task.status_id,
+            to_status_id=status_id,
+            actor_id=actor.user.id,
+        )
+    )
+    task.status_id = status_id
+    task.revision += 1
+    db.add(
+        AuditLog(
+            actor_id=actor.user.id,
+            action="request.resident_issue",
+            target_type="requests",
+            target_id=task.id,
+        )
     )
     await db.flush()
     return task
