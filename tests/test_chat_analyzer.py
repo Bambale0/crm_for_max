@@ -94,9 +94,7 @@ async def test_urgent_problem_uses_fallback_when_deepseek_times_out(
     assert job.error_code == "timeout"
     assert job.text == ""
 
-    signal = await db_session.scalar(
-        select(ChatSignal).where(ChatSignal.event_key == "b" * 64)
-    )
+    signal = await db_session.scalar(select(ChatSignal).where(ChatSignal.event_key == "b" * 64))
     assert signal is not None
     assert signal.source == "urgent_fallback"
     assert signal.severity == "urgent"
