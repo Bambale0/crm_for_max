@@ -56,3 +56,33 @@ def test_bot_namespaces_require_distinct_secrets() -> None:
 def test_operator_and_employee_ids_cannot_overlap() -> None:
     with pytest.raises(ValidationError, match="must not overlap"):
         Settings(_env_file=None, max_operator_ids=(202,), max_employee_ids=(202,))
+
+
+def test_deepseek_settings_are_validated_and_secret_is_redacted() -> None:
+    settings = Settings(
+        _env_file=None,
+        deepseek_api_key=SecretStr("synthetic-deepseek-secret"),
+        deepseek_model="deepseek-v4-flash",
+        deepseek_base_url="https://api.deepseek.com/",
+        deepseek_timeout_seconds=8,
+        deepseek_min_confidence=0.8,
+    )
+    assert settings.deepseek_base_url == "https://api.deepseek.com"
+    assert settings.deepseek_model == "deepseek-v4-flash"
+    assert settings.deepseek_timeout_seconds == 8
+    assert settings.deepseek_min_confidence == 0.8
+    assert "synthetic-deepseek-secret" not in repr(settings)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("deepseek_base_url", "https://example.com"),
+        ("deepseek_model", "deepseek-chat"),
+        ("deepseek_timeout_seconds", 0),
+        ("deepseek_min_confidence", 0.2),
+    ],
+)
+def test_invalid_deepseek_settings_rejected(field: str, value: object) -> None:
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, **{field: value})
