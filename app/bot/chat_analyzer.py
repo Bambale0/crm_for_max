@@ -52,12 +52,13 @@ async def notify_group_problem(
 
 
 async def _locked_job(db: AsyncSession, job_id: UUID) -> ChatAnalysisJob | None:
-    return await db.scalar(
+    job: ChatAnalysisJob | None = await db.scalar(
         select(ChatAnalysisJob)
         .where(ChatAnalysisJob.id == job_id)
         .with_for_update()
         .execution_options(populate_existing=True)
     )
+    return job
 
 
 async def analyze_one(
