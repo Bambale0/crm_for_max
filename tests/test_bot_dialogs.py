@@ -17,6 +17,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.schema import CreateSchema
 
 from app.api.dependencies import get_db
+from app.bot.chat_analyzer import analyze_one
+from app.bot.chat_signals import DeepSeekLike
 from app.bot.identity import native_actor, resident_actor
 from app.bot.setup import bind_chat, initialize
 from app.bot.ui import reply
@@ -31,6 +33,7 @@ from app.models.bot import (
     BotGroupChat,
     BotOrganizationSettings,
     BotReceipt,
+    ChatAnalysisJob,
     ChatObservation,
     ChatSignal,
 )
@@ -104,6 +107,17 @@ async def send(client: AsyncClient, data: dict[str, object], namespace: str = "s
         },
     )
     assert result.status_code == 200, result.text
+
+
+async def drain_chat_analysis(
+    db: AsyncSession,
+    settings: Settings,
+    classifier: DeepSeekLike,
+) -> None:
+    for _ in range(100):
+        if not await analyze_one(db, settings, classifier):
+            return
+    raise AssertionError("Chat analysis queue did not drain")
 
 
 async def latest_text(db: AsyncSession, max_id: int = 101) -> str:
@@ -617,6 +631,8 @@ async def test_main_bot_filters_group_chatter_and_alerts_operator(
     client: AsyncClient,
     db_session: AsyncSession,
     bot_catalog: Organization,
+    test_settings: Settings,
+    deepseek_classifier: DeepSeekLike,
 ) -> None:
     await send(client, event(101, text="/start"))
     before = await db_session.scalar(
@@ -631,6 +647,9 @@ async def test_main_bot_filters_group_chatter_and_alerts_operator(
     ):
         await send(client, event(999, text=text, chat_type="chat", chat_id=-700))
 
+    assert await db_session.scalar(select(func.count()).select_from(ChatAnalysisJob)) == 4
+    assert await db_session.scalar(select(func.count()).select_from(ChatSignal)) == 0
+    await drain_chat_analysis(db_session, test_settings, deepseek_classifier)
     after_chatter = await db_session.scalar(
         select(func.count()).select_from(BotDelivery).where(BotDelivery.max_user_id == 101)
     )
@@ -646,6 +665,8 @@ async def test_main_bot_filters_group_chatter_and_alerts_operator(
             chat_id=-700,
         ),
     )
+    assert await db_session.scalar(select(func.count()).select_from(ChatSignal)) == 0
+    await drain_chat_analysis(db_session, test_settings, deepseek_classifier)
     signal = await latest_text(db_session, 101)
     assert "Сигнал из чата" in signal
     assert "MAX ID: 999" in signal
@@ -672,6 +693,7 @@ async def test_main_bot_filters_group_chatter_and_alerts_operator(
             chat_id=-700,
         ),
     )
+    await drain_chat_analysis(db_session, test_settings, deepseek_classifier)
     assert (
         await db_session.scalar(
             select(func.count()).select_from(BotDelivery).where(BotDelivery.max_user_id == 101)
@@ -689,6 +711,7 @@ async def test_main_bot_filters_group_chatter_and_alerts_operator(
             chat_id=-700,
         ),
     )
+    await drain_chat_analysis(db_session, test_settings, deepseek_classifier)
     assert (
         await db_session.scalar(
             select(func.count()).select_from(BotDelivery).where(BotDelivery.max_user_id == 101)
@@ -706,6 +729,7 @@ async def test_main_bot_filters_group_chatter_and_alerts_operator(
             chat_id=-700,
         ),
     )
+    await drain_chat_analysis(db_session, test_settings, deepseek_classifier)
     assert "пахнет газом" in (await latest_text(db_session, 101)).lower()
     assert await db_session.scalar(select(func.count()).select_from(ChatSignal)) == 2
 
@@ -718,6 +742,7 @@ async def test_main_bot_filters_group_chatter_and_alerts_operator(
             chat_id=-700,
         ),
     )
+    await drain_chat_analysis(db_session, test_settings, deepseek_classifier)
     assert "MAX ID: 998" in await latest_text(db_session, 101)
     assert await db_session.scalar(select(func.count()).select_from(ChatSignal)) == 3
 
@@ -882,6 +907,7 @@ async def test_owner_controls_group_chat_analysis(
     db_session: AsyncSession,
     bot_catalog: Organization,
     test_settings: Settings,
+    deepseek_classifier: DeepSeekLike,
 ) -> None:
     await send(
         client,
@@ -897,6 +923,11 @@ async def test_owner_controls_group_chat_analysis(
     await send(client, event(101, payload="admin_chat_toggle:-800:0"))
     await db_session.refresh(chat)
     assert not chat.analysis_enabled
+    await drain_chat_analysis(db_session, test_settings, deepseek_classifier)
+    queued = await db_session.scalar(
+        select(ChatAnalysisJob).where(ChatAnalysisJob.chat_id == -800)
+    )
+    assert queued is not None and queued.state == "discarded" and queued.text == ""
 
     owner_before = await db_session.scalar(
         select(func.count()).select_from(BotDelivery).where(BotDelivery.max_user_id == 101)
