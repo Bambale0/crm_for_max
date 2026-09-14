@@ -679,6 +679,35 @@ async def test_main_bot_filters_group_chatter_and_alerts_operator(
     await send(
         client,
         event(
+            999,
+            text="Лифт не работает второй час",
+            chat_type="chat",
+            chat_id=-700,
+        ),
+    )
+    assert (
+        await db_session.scalar(
+            select(func.count()).select_from(BotDelivery).where(BotDelivery.max_user_id == 101)
+        )
+        == owner_after_first
+    )
+    assert await db_session.scalar(select(func.count()).select_from(ChatSignal)) == 1
+
+    await send(
+        client,
+        event(
+            999,
+            text="В подъезде пахнет газом",
+            chat_type="chat",
+            chat_id=-700,
+        ),
+    )
+    assert "пахнет газом" in (await latest_text(db_session, 101)).lower()
+    assert await db_session.scalar(select(func.count()).select_from(ChatSignal)) == 2
+
+    await send(
+        client,
+        event(
             998,
             text="Опять течёт труба в подъезде, вода уже на полу",
             chat_type="chat",
@@ -686,7 +715,7 @@ async def test_main_bot_filters_group_chatter_and_alerts_operator(
         ),
     )
     assert "MAX ID: 998" in await latest_text(db_session, 101)
-    assert await db_session.scalar(select(func.count()).select_from(ChatSignal)) == 2
+    assert await db_session.scalar(select(func.count()).select_from(ChatSignal)) == 3
 
 
 async def test_operator_dispatcher_menu_assignment_and_executor_isolation(
