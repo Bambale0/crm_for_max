@@ -335,7 +335,7 @@ async def handle_owner_admin(
                         + ("настроен" if settings.deepseek_api_key else "не настроен")
                     ),
                     f"Модель: {settings.deepseek_model}",
-                    "Thinking: включён · high",
+                    "Thinking: включён · max",
                     f"MAX bot token: {'настроен' if settings.max_staff_token else 'не настроен'}",
                     (
                         "Webhook secret: "
