@@ -9,20 +9,21 @@ from pydantic import ValidationError
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import get_db, get_settings
+from app.api.dependencies import get_db, get_deepseek_classifier, get_settings
 from app.auth.service import InvalidCredentials
 from app.bot.admin import (
     dispatcher_max_ids,
     ensure_group_chat,
     get_bot_settings,
 )
-from app.bot.chat_signals import classify_group_problem, record_signal_if_fresh
+from app.bot.chat_signals import classify_group_message, record_signal_if_fresh
 from app.bot.dialogs import conversation, handle_staff, staff_menu
 from app.bot.identity import native_actor, resident_actor
 from app.bot.resident import handle_resident, resident_menu
 from app.bot.ui import reply
 from app.bot.updates import normalize_update
 from app.core.config import Settings
+from app.integrations.deepseek.client import DeepSeekClassifier
 from app.crm.errors import CRMConflict, CRMError
 from app.models.bot import BotReceipt, ChatObservation, HouseChat
 
@@ -58,6 +59,7 @@ async def max_webhook(
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
     settings: Annotated[Settings, Depends(get_settings)],
+    deepseek: Annotated[DeepSeekClassifier | None, Depends(get_deepseek_classifier)],
 ) -> dict[str, bool]:
     secret = (
         settings.max_staff_webhook_secret
@@ -109,7 +111,11 @@ async def max_webhook(
             chat = await ensure_group_chat(db, organization_id, update.chat_id)
             bot_settings = await get_bot_settings(db, organization_id)
             if bot_settings.group_analysis_enabled and chat.analysis_enabled:
-                classified = classify_group_problem(update.text)
+                classified = await classify_group_message(
+                    deepseek,
+                    update.text,
+                    min_confidence=settings.deepseek_min_confidence,
+                )
                 if classified is not None:
                     signal = await record_signal_if_fresh(
                         db,
