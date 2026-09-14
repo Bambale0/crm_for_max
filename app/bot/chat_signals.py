@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.integrations.deepseek.client import DeepSeekFailure, DeepSeekResult
-from app.models.bot import BotGroupChat, ChatSignal
+from app.models.bot import BotGroupChat, ChatAnalysisJob, ChatSignal
 
 logger = logging.getLogger(__name__)
 
@@ -110,6 +110,25 @@ async def classify_group_message(
         source="deepseek",
         confidence=result.confidence,
     )
+
+
+async def enqueue_chat_analysis(
+    db: AsyncSession,
+    *,
+    event_key: str,
+    chat_id: int,
+    actor_max_user_id: int,
+    text: str,
+) -> ChatAnalysisJob:
+    job = ChatAnalysisJob(
+        event_key=event_key,
+        chat_id=chat_id,
+        actor_max_user_id=actor_max_user_id,
+        text=normalize_problem_text(text)[:4000],
+    )
+    db.add(job)
+    await db.flush()
+    return job
 
 
 async def record_signal_if_fresh(
