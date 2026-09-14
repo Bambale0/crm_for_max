@@ -17,7 +17,7 @@ from pydantic import SecretStr
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
-from app.api.dependencies import get_db, get_deepseek_classifier, get_redis
+from app.api.dependencies import get_db, get_redis
 from app.core.config import Settings
 from app.integrations.deepseek.client import DeepSeekResult
 from app.main import create_app
@@ -128,7 +128,6 @@ def app(
     test_settings: Settings,
     db_session: AsyncSession,
     redis_client: Redis,
-    deepseek_classifier: SyntheticDeepSeekClassifier,
 ) -> FastAPI:
     instance = create_app(test_settings)
 
@@ -137,7 +136,6 @@ def app(
 
     instance.dependency_overrides[get_db] = test_db
     instance.dependency_overrides[get_redis] = lambda: redis_client
-    instance.dependency_overrides[get_deepseek_classifier] = lambda: deepseek_classifier
     return instance
 
 
