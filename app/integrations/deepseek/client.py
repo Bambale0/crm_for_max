@@ -117,7 +117,7 @@ class DeepSeekClassifier:
                     "thinking": {"type": "enabled"},
                     "reasoning_effort": "high",
                     "response_format": {"type": "json_object"},
-                    "max_tokens": 1024,
+                    "max_tokens": 2048,
                 },
             )
         except httpx.TimeoutException:
@@ -135,5 +135,5 @@ class DeepSeekClassifier:
                 raise ValueError
             parsed = json.loads(content)
             return DeepSeekResult.model_validate(parsed)
-        except (KeyError, IndexError, TypeError, ValueError, ValidationError, json.JSONDecodeError):
+        except (KeyError, IndexError, TypeError, ValueError, ValidationError):
             raise DeepSeekFailure("invalid_response") from None
