@@ -31,6 +31,7 @@
 - [План реализации](IMPLEMENTATION_PLAN.md) — этапы Э0–Э8, зависимости, начальный бэклог и предварительная оценка сроков.
 - [Эпики](docs/epics/README.md) — содержание крупных работ, условия старта и завершения; [задачи в GitHub](https://github.com/Bambale0/crm_for_max/issues?q=is%3Aissue%20label%3Aepic).
 - [Локальный запуск и проверки](docs/development.md) — Docker Compose, миграции, тестовая БД и CI.
+- [Автоматический деплой](docs/deployment.md) — запуск после успешного CI, health gate и откат.
 - [Вход через MAX](docs/authentication.md) — env, API входа, сессии и отзыв доступа.
 - [Диагностика MAX](docs/max-integration.md) — проверка ботов без отправки сообщений.
 - [Ручная регистрация заявки](docs/crm-intake.md) — справочники, права доступа, API и повторные отправки.
