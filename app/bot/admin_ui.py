@@ -329,7 +329,13 @@ async def handle_owner_admin(
                         "Анализ групповых чатов: "
                         + ("включён" if bot_settings.group_analysis_enabled else "выключен")
                     ),
-                    "Фильтр сообщений: встроенные признаки проблемы",
+                    "Фильтр сообщений: DeepSeek V4 Flash",
+                    (
+                        "DeepSeek API: "
+                        + ("настроен" if settings.deepseek_api_key else "не настроен")
+                    ),
+                    f"Модель: {settings.deepseek_model}",
+                    "Thinking: включён · max",
                     f"MAX bot token: {'настроен' if settings.max_staff_token else 'не настроен'}",
                     (
                         "Webhook secret: "
