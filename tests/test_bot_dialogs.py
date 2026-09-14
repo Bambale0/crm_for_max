@@ -32,6 +32,7 @@ from app.models.bot import (
     BotOrganizationSettings,
     BotReceipt,
     ChatObservation,
+    ChatSignal,
 )
 from app.models.crm import (
     Category,
@@ -622,14 +623,19 @@ async def test_main_bot_filters_group_chatter_and_alerts_operator(
         select(func.count()).select_from(BotDelivery).where(BotDelivery.max_user_id == 101)
     )
 
-    await send(
-        client,
-        event(999, text="Кто сегодня смотрел футбол?", chat_type="chat", chat_id=-700),
-    )
+    for text in (
+        "Кто сегодня смотрел футбол?",
+        "Лифт уже работает, починили",
+        "На улице очень холодно сегодня",
+        "Ты вообще мусор какой-то",
+    ):
+        await send(client, event(999, text=text, chat_type="chat", chat_id=-700))
+
     after_chatter = await db_session.scalar(
         select(func.count()).select_from(BotDelivery).where(BotDelivery.max_user_id == 101)
     )
     assert after_chatter == before
+    assert await db_session.scalar(select(func.count()).select_from(ChatSignal)) == 0
 
     await send(
         client,
@@ -647,7 +653,40 @@ async def test_main_bot_filters_group_chatter_and_alerts_operator(
     operator_signal = await latest_text(db_session, 404)
     assert "Сигнал из чата" in operator_signal
     assert "MAX ID: 999" in operator_signal
+    assert await db_session.scalar(select(func.count()).select_from(ChatSignal)) == 1
     assert await db_session.scalar(select(func.count()).select_from(ServiceRequest)) == 0
+
+    owner_after_first = await db_session.scalar(
+        select(func.count()).select_from(BotDelivery).where(BotDelivery.max_user_id == 101)
+    )
+    await send(
+        client,
+        event(
+            999,
+            text="Опять течёт труба в подъезде, вода уже на полу!!!",
+            chat_type="chat",
+            chat_id=-700,
+        ),
+    )
+    assert (
+        await db_session.scalar(
+            select(func.count()).select_from(BotDelivery).where(BotDelivery.max_user_id == 101)
+        )
+        == owner_after_first
+    )
+    assert await db_session.scalar(select(func.count()).select_from(ChatSignal)) == 1
+
+    await send(
+        client,
+        event(
+            998,
+            text="Опять течёт труба в подъезде, вода уже на полу",
+            chat_type="chat",
+            chat_id=-700,
+        ),
+    )
+    assert "MAX ID: 998" in await latest_text(db_session, 101)
+    assert await db_session.scalar(select(func.count()).select_from(ChatSignal)) == 2
 
 
 async def test_operator_dispatcher_menu_assignment_and_executor_isolation(
