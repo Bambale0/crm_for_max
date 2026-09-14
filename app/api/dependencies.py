@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
 from app.core.database import Database
+from app.integrations.deepseek.client import DeepSeekClassifier
 
 
 def get_settings(request: Request) -> Settings:
@@ -15,6 +16,10 @@ def get_settings(request: Request) -> Settings:
 
 def get_redis(request: Request) -> Redis:
     return cast(Redis, request.app.state.redis)
+
+
+def get_deepseek_classifier(request: Request) -> DeepSeekClassifier | None:
+    return cast(DeepSeekClassifier | None, request.app.state.deepseek_classifier)
 
 
 async def get_db(request: Request) -> AsyncIterator[AsyncSession]:
