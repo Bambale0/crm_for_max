@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.service import InvalidCredentials
 from app.bot.admin import dispatcher_max_ids
 from app.bot.chat_signals import (
+    DeepSeekLike,
     problem_from_deepseek_result,
     record_signal_if_fresh,
     urgent_fallback,
@@ -61,7 +62,7 @@ async def _locked_job(db: AsyncSession, job_id) -> ChatAnalysisJob | None:
 async def analyze_one(
     db: AsyncSession,
     settings: Settings,
-    classifier: DeepSeekClassifier,
+    classifier: DeepSeekLike,
 ) -> bool:
     now = datetime.now(UTC)
     await db.execute(
