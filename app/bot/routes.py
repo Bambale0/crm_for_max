@@ -29,6 +29,8 @@ from app.models.bot import BotReceipt, ChatObservation, HouseChat
 router = APIRouter(prefix="/api/bots/max", tags=["MAX bots"])
 MAX_UPDATE_BYTES = 256 * 1024
 IMPORTANT_WORDS = ("пожар", "дым", "запах газа", "прорвало", "затоп", "искрит", "авари")
+
+
 async def notify_group_problem(
     db: AsyncSession,
     settings: Settings,
