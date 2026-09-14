@@ -114,10 +114,10 @@ class DeepSeekClassifier:
                         {"role": "system", "content": SYSTEM_PROMPT},
                         {"role": "user", "content": message},
                     ],
-                    "thinking": {"type": "disabled"},
+                    "thinking": {"type": "enabled"},
+                    "reasoning_effort": "high",
                     "response_format": {"type": "json_object"},
-                    "max_tokens": 160,
-                    "temperature": 0,
+                    "max_tokens": 1024,
                 },
             )
         except httpx.TimeoutException:
