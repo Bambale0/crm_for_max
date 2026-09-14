@@ -46,3 +46,9 @@ def test_group_classifier_normalizes_duplicate_fingerprint() -> None:
     second = classify_group_problem("  лифт   не работает ")
     assert first is not None and second is not None
     assert first.fingerprint == second.fingerprint
+
+
+def test_group_classifier_keeps_problem_after_resolved_clause() -> None:
+    result = classify_group_problem("Вода есть, но труба под раковиной течёт")
+    assert result is not None
+    assert result.severity == "normal"
