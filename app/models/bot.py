@@ -8,6 +8,7 @@ from sqlalchemy import (
     Boolean,
     DateTime,
     ForeignKey,
+    Float,
     ForeignKeyConstraint,
     Identity,
     Index,
@@ -98,6 +99,8 @@ class ChatSignal(Base):
     actor_max_user_id: Mapped[int] = mapped_column(BigInteger)
     fingerprint: Mapped[str] = mapped_column(String(64))
     severity: Mapped[str] = mapped_column(String(16))
+    source: Mapped[str] = mapped_column(String(24))
+    confidence: Mapped[float | None] = mapped_column(Float)
     problem: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
