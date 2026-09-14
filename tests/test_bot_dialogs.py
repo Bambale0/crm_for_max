@@ -654,6 +654,10 @@ async def test_main_bot_filters_group_chatter_and_alerts_operator(
     assert "Сигнал из чата" in operator_signal
     assert "MAX ID: 999" in operator_signal
     assert await db_session.scalar(select(func.count()).select_from(ChatSignal)) == 1
+    stored_signal = await db_session.scalar(select(ChatSignal).where(ChatSignal.chat_id == -700))
+    assert stored_signal is not None
+    assert stored_signal.source == "deepseek"
+    assert stored_signal.confidence == 0.97
     assert await db_session.scalar(select(func.count()).select_from(ServiceRequest)) == 0
 
     owner_after_first = await db_session.scalar(
