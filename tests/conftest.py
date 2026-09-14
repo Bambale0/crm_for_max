@@ -17,9 +17,54 @@ from pydantic import SecretStr
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
-from app.api.dependencies import get_db, get_redis
+from app.api.dependencies import get_db, get_deepseek_classifier, get_redis
 from app.core.config import Settings
+from app.integrations.deepseek.client import DeepSeekResult
 from app.main import create_app
+
+
+class SyntheticDeepSeekClassifier:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    async def classify(self, text: str) -> DeepSeekResult:
+        self.calls.append(text)
+        value = text.casefold().replace("ё", "е")
+        resolved = any(
+            marker in value
+            for marker in ("починили", "уже работает", "все нормально", "всё нормально")
+        )
+        contrast = any(marker in f" {value} " for marker in (" но ", " однако ", " при этом "))
+        urgent = any(
+            marker in value
+            for marker in ("пахнет газом", "запах газа", "дым", "искрит", "затапливает")
+        )
+        problem = urgent or any(
+            marker in value
+            for marker in (
+                "теч",
+                "не работает",
+                "нет воды",
+                "воды нет",
+                "нет света",
+                "света нет",
+                "мусор не вывоз",
+                "канализац",
+            )
+        )
+        if resolved and not contrast and not urgent:
+            problem = False
+        return DeepSeekResult(
+            is_problem=problem,
+            problem=text if problem else "",
+            confidence=0.97,
+            severity="urgent" if urgent else "normal",
+        )
+
+
+@pytest.fixture
+def deepseek_classifier() -> SyntheticDeepSeekClassifier:
+    return SyntheticDeepSeekClassifier()
 
 
 @pytest.fixture
@@ -79,7 +124,12 @@ async def redis_client(test_settings: Settings) -> AsyncIterator[Redis]:
 
 
 @pytest.fixture
-def app(test_settings: Settings, db_session: AsyncSession, redis_client: Redis) -> FastAPI:
+def app(
+    test_settings: Settings,
+    db_session: AsyncSession,
+    redis_client: Redis,
+    deepseek_classifier: SyntheticDeepSeekClassifier,
+) -> FastAPI:
     instance = create_app(test_settings)
 
     async def test_db() -> AsyncIterator[AsyncSession]:
@@ -87,6 +137,7 @@ def app(test_settings: Settings, db_session: AsyncSession, redis_client: Redis) 
 
     instance.dependency_overrides[get_db] = test_db
     instance.dependency_overrides[get_redis] = lambda: redis_client
+    instance.dependency_overrides[get_deepseek_classifier] = lambda: deepseek_classifier
     return instance
 
 
