@@ -59,6 +59,31 @@ class HouseChat(Base):
     category_id: Mapped[UUID] = mapped_column()
 
 
+class BotOrganizationSettings(Base):
+    __tablename__ = "bot_organization_settings"
+
+    organization_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"), primary_key=True)
+    group_analysis_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default=sql_text("true")
+    )
+
+
+class BotGroupChat(Base):
+    __tablename__ = "bot_group_chats"
+
+    chat_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    organization_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"), index=True)
+    analysis_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default=sql_text("true")
+    )
+    first_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    last_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
 class ChatObservation(Base):
     __tablename__ = "chat_observations"
 

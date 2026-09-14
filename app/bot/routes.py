@@ -11,9 +11,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import get_db, get_settings
 from app.auth.service import InvalidCredentials
-from app.bot.dialogs import conversation, handle_staff, reply, staff_menu
+from app.bot.admin import (
+    dispatcher_max_ids,
+    ensure_group_chat,
+    get_bot_settings,
+)
+from app.bot.dialogs import conversation, handle_staff, staff_menu
 from app.bot.identity import native_actor, resident_actor
 from app.bot.resident import handle_resident, resident_menu
+from app.bot.ui import reply
 from app.bot.updates import normalize_update
 from app.core.config import Settings
 from app.crm.errors import CRMConflict, CRMError
@@ -57,7 +63,10 @@ async def notify_group_problem(
     max_user_id: int,
     problem: str,
 ) -> None:
-    for operator_id in settings.max_dispatcher_ids:
+    organization_id = settings.max_bot_organization_id
+    if organization_id is None:
+        return
+    for operator_id in await dispatcher_max_ids(db, organization_id, settings.max_owner_ids):
         try:
             operator = await native_actor(db, settings, operator_id)
         except InvalidCredentials:
@@ -121,8 +130,16 @@ async def max_webhook(
 
     if namespace == "staff" and not update.is_private:
         assert update.text is not None
-        if looks_like_problem(update.text):
-            await notify_group_problem(db, settings, update.actor_id, update.text)
+        organization_id = settings.max_bot_organization_id
+        if organization_id is not None:
+            chat = await ensure_group_chat(db, organization_id, update.chat_id)
+            bot_settings = await get_bot_settings(db, organization_id)
+            if (
+                bot_settings.group_analysis_enabled
+                and chat.analysis_enabled
+                and looks_like_problem(update.text)
+            ):
+                await notify_group_problem(db, settings, update.actor_id, update.text)
         await db.commit()
         return {"ok": True}
 
@@ -152,7 +169,10 @@ async def max_webhook(
         if update.callback_id:
             await reply(db, actor, "", callback_id=update.callback_id)
 
-        buttons = staff_menu(settings, actor) if is_staff else resident_menu()
+        if is_staff and settings.max_bot_organization_id is not None:
+            buttons = await staff_menu(db, actor, settings.max_bot_organization_id)
+        else:
+            buttons = resident_menu()
         if update.timestamp_ms >= state.last_timestamp_ms:
             state.last_timestamp_ms = update.timestamp_ms
             try:

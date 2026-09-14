@@ -8,7 +8,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.actor import Actor
-from app.bot.dialogs import Buttons, button, notify_owners, reply
+from app.bot.dialogs import notify_owners
+from app.bot.ui import Buttons, button, reply
 from app.bot.updates import IncomingUpdate
 from app.core.config import Settings
 from app.models.bot import BotConversation
