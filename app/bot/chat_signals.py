@@ -68,11 +68,20 @@ BROKEN_MARKERS = (
     "не включается",
     "не открывается",
     "не закрывается",
+    "не едет",
+    "застрял",
+    "застряла",
+    "застряли",
 )
 
 WATER_OUTAGE_MARKERS = (
     "нет воды",
     "без воды",
+    "нет горячей воды",
+    "нет холодной воды",
+    "горячей воды нет",
+    "холодной воды нет",
+    "отключили воду",
 )
 
 WATER_LEAK_MARKERS = (
@@ -101,6 +110,7 @@ WATER_TARGETS = (
 
 POWER_MARKERS = (
     "нет света",
+    "света нет",
     "нет электричества",
     "электричества нет",
     "выбило свет",
@@ -109,15 +119,14 @@ POWER_MARKERS = (
 
 SEWER_PROBLEM_MARKERS = (
     "засор",
-    "воняет канализац",
-    "запах канализац",
-    "канализация течет",
-    "канализация течёт",
     "не уходит вода",
 )
 
+SEWER_TARGETS = ("канализац",)
+SEWER_MARKERS = ("вон", "запах", "теч", "не работает")
+
 TRASH_TARGETS = ("мусор", "контейнер", "бак", "помой")
-TRASH_MARKERS = ("не вывез", "переполн", "завален", "лежит", "уберите")
+TRASH_MARKERS = ("не вывез", "не вывоз", "переполн", "завален", "лежит", "уберите")
 
 HEATING_TARGETS = ("батар", "отоплен", "радиатор")
 HEATING_MARKERS = ("холод", "не гре", "нет отопления")
@@ -169,6 +178,9 @@ def classify_group_problem(text: str) -> GroupProblem | None:
     )
     is_problem = is_problem or _contains_any(searchable, POWER_MARKERS)
     is_problem = is_problem or _contains_any(searchable, SEWER_PROBLEM_MARKERS)
+    is_problem = is_problem or (
+        _contains_any(searchable, SEWER_TARGETS) and _contains_any(searchable, SEWER_MARKERS)
+    )
     is_problem = is_problem or (
         _contains_any(searchable, TARGETS_GENERIC) and _contains_any(searchable, BROKEN_MARKERS)
     )
