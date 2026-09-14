@@ -86,6 +86,23 @@ class BotGroupChat(Base):
     )
 
 
+class ChatAnalysisJob(Base):
+    __tablename__ = "chat_analysis_jobs"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    event_key: Mapped[str] = mapped_column(String(64), unique=True)
+    chat_id: Mapped[int] = mapped_column(ForeignKey("bot_group_chats.chat_id"), index=True)
+    actor_max_user_id: Mapped[int] = mapped_column(BigInteger)
+    text: Mapped[str] = mapped_column(Text)
+    state: Mapped[str] = mapped_column(
+        String(16), default="pending", server_default="pending", index=True
+    )
+    attempts: Mapped[int] = mapped_column(default=0, server_default="0")
+    last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    error_code: Mapped[str | None] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class ChatSignal(Base):
     __tablename__ = "chat_signals"
     __table_args__ = (
