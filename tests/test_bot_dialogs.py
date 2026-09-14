@@ -259,11 +259,21 @@ async def test_old_button_and_lost_assignment_cannot_change_task(
 ) -> None:
     task = await create_task(client, db_session)
     employee = await db_session.scalar(select(Employee).where(Employee.max_user_id == 202))
-    owner = await db_session.scalar(select(Employee).where(Employee.max_user_id == 101))
-    assert employee and owner
+    assert employee
+    replacement = Employee(
+        organization_id=bot_catalog.id,
+        max_user_id=606,
+        display_name="Сотрудник 606",
+        role_id=employee.role_id,
+        all_houses=True,
+        all_categories=True,
+    )
+    db_session.add(replacement)
+    await db_session.flush()
+
     await send(client, event(payload=f"assign:{task.id}:0:{employee.id}"))
     await send(client, event(202, payload=f"progress:{task.id}:1:needs"))
-    await send(client, event(payload=f"assign:{task.id}:1:{owner.id}"))
+    await send(client, event(payload=f"assign:{task.id}:1:{replacement.id}"))
     await send(client, event(202, text="Чужое пояснение после переназначения"))
     assert await db_session.scalar(select(func.count()).select_from(TaskProgress)) == 0
     await send(client, event(payload=f"progress:{task.id}:1:done"))
