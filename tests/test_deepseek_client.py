@@ -9,7 +9,7 @@ from pydantic import SecretStr
 from app.integrations.deepseek.client import DeepSeekClassifier, DeepSeekFailure
 
 
-async def test_deepseek_v4_flash_uses_thinking_high_and_json_output() -> None:
+async def test_deepseek_v4_flash_uses_max_thinking_and_json_output() -> None:
     requests: list[httpx.Request] = []
 
     def transport(request: httpx.Request) -> httpx.Response:
@@ -49,9 +49,9 @@ async def test_deepseek_v4_flash_uses_thinking_high_and_json_output() -> None:
     body = json.loads(request.content)
     assert body["model"] == "deepseek-v4-flash"
     assert body["thinking"] == {"type": "enabled"}
-    assert body["reasoning_effort"] == "high"
+    assert body["reasoning_effort"] == "max"
     assert body["response_format"] == {"type": "json_object"}
-    assert body["max_tokens"] == 2048
+    assert body["max_tokens"] == 32768
     assert "temperature" not in body
     assert request.headers["Authorization"] == "Bearer synthetic-deepseek-key"
 
