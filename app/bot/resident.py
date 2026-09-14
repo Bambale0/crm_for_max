@@ -203,9 +203,7 @@ async def _show_request(
     visible_status = RESIDENT_STATUS.get(status.code, status.name)
     buttons: Buttons = []
     if status.code == "closed":
-        buttons.append(
-            [button("Проблема осталась", f"resident_issue:{task.id}:{task.revision}")]
-        )
+        buttons.append([button("Проблема осталась", f"resident_issue:{task.id}:{task.revision}")])
     buttons.extend(
         [
             [button("Мои заявки", "resident_mine:0")],
