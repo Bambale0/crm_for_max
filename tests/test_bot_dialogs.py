@@ -42,6 +42,7 @@ from app.models.crm import (
     Role,
     ServiceRequest,
 )
+from app.models.identity import User
 from app.models.task_progress import TaskProgress
 
 pytestmark = pytest.mark.integration
