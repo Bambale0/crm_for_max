@@ -26,6 +26,7 @@ from app.crm.task_workflow import (
     dispatcher_counts,
     list_dispatch_tasks,
     list_tasks,
+    operator_transition,
     report_progress,
     visible_task,
 )
@@ -173,9 +174,8 @@ async def task_card(
         )
     access = await load_access(db, actor, task.organization_id, "requests.view")
     rows: Buttons = []
-    if "requests.update" in access.permissions and (
-        actor.is_owner or (assignee and assignee.max_user_id == actor.user.max_user_id)
-    ):
+    is_assignee = assignee is not None and assignee.max_user_id == actor.user.max_user_id
+    if "requests.update" in access.permissions and is_assignee:
         rows.extend(
             [
                 [
@@ -187,9 +187,56 @@ async def task_card(
             ]
         )
     if "requests.assign" in access.permissions:
-        rows.append([button("Назначить исполнителя", f"assignees:{task.id}:{task.revision}:0")])
+        if status and status.code == "done":
+            rows.append(
+                [
+                    button("Закрыть заявку", f"lifecycle:{task.id}:{task.revision}:close"),
+                    button("Вернуть в работу", f"lifecycle:{task.id}:{task.revision}:reopen"),
+                ]
+            )
+        elif status and status.code in {"closed", "resident_issue", "needs", "not_done"}:
+            rows.append([button("Вернуть в работу", f"lifecycle:{task.id}:{task.revision}:reopen")])
+        if not status or status.code != "closed":
+            rows.append([button("Назначить исполнителя", f"assignees:{task.id}:{task.revision}:0")])
     rows.extend([[button("Обновить", f"task:{task.id}"), button("Меню", "menu")]])
     await reply(db, actor, "\n".join(line for line in lines if line), rows)
+
+
+async def notify_resident(
+    db: AsyncSession,
+    task: ServiceRequest,
+    text: str,
+) -> None:
+    if task.source != "resident_bot":
+        return
+    user = await db.get(User, task.created_by, populate_existing=True)
+    if user is None or not user.is_active:
+        return
+    resident = Actor(user=user, is_owner=False)
+    await reply(
+        db,
+        resident,
+        text,
+        [[button("Открыть заявку", f"resident_task:{task.id}")]],
+    )
+
+
+async def notify_assignee(
+    db: AsyncSession,
+    settings: Settings,
+    task: ServiceRequest,
+    prefix: str,
+) -> None:
+    if task.assignee_id is None:
+        return
+    employee = await db.get(Employee, task.assignee_id, populate_existing=True)
+    if employee is None or not employee.is_active:
+        return
+    try:
+        recipient = await native_actor(db, settings, employee.max_user_id, employee.display_name)
+    except InvalidCredentials:
+        return
+    await task_card(db, recipient, task, prefix)
 
 
 async def notify_owners(
@@ -462,6 +509,7 @@ async def handle_staff(
         "assign",
         "dispatch",
         "executors",
+        "lifecycle",
     }:
         state.state, state.data = "menu", {}
     if action in {"house", "houses", "category", "categories"} and len(parts) == 3:
@@ -656,6 +704,30 @@ async def handle_staff(
         recipient = await native_actor(db, settings, employee.max_user_id, employee.display_name)
         await task_card(db, recipient, task, "Вам назначено задание.")
         await task_card(db, actor, task, "Исполнитель назначен.")
+        return
+    if action == "lifecycle" and len(parts) == 4 and parts[3] in {"close", "reopen"}:
+        task = await operator_transition(
+            db,
+            actor,
+            UUID(parts[1]),
+            parts[3],
+            int(parts[2]),
+        )
+        if parts[3] == "close":
+            await task_card(db, actor, task, "Заявка закрыта.")
+            await notify_resident(
+                db,
+                task,
+                f"Заявка №{task.number} выполнена. Если проблема осталась, откройте заявку.",
+            )
+        else:
+            await task_card(db, actor, task, "Заявка возвращена в работу.")
+            await notify_assignee(db, settings, task, "Оператор вернул заявку в работу.")
+            await notify_resident(
+                db,
+                task,
+                f"Заявка №{task.number} снова в работе.",
+            )
         return
     if action == "progress" and len(parts) == 4 and parts[3] in PROGRESS_STATES:
         task = await visible_task(db, actor, UUID(parts[1]))

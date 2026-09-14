@@ -42,6 +42,7 @@ from app.models.crm import (
     Role,
     ServiceRequest,
 )
+from app.models.identity import User
 from app.models.task_progress import TaskProgress
 
 pytestmark = pytest.mark.integration
@@ -890,3 +891,144 @@ async def test_non_owner_cannot_open_owner_admin(
     )
     assert delivery and delivery.buttons
     assert "Управление" not in [item["text"] for row in delivery.buttons for item in row]
+
+
+async def test_resident_request_closure_and_problem_remains_cycle(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    bot_catalog: Organization,
+) -> None:
+    resident_id = 307
+    await send(client, event(resident_id, payload="resident_new"))
+    await send(client, event(resident_id, text="Мария"))
+    await send(client, event(resident_id, text="ул. Тестовая, 10, кв. 2"))
+    await send(client, event(resident_id, text="Не работает слив"))
+    await send(client, event(resident_id, text="+79990001122"))
+    state = await db_session.get(BotConversation, resident_id)
+    assert state and state.state == "resident_confirm"
+    await send(client, event(resident_id, payload=f"resident_confirm:{state.data['flow']}"))
+
+    task = await db_session.scalar(
+        select(ServiceRequest).where(
+            ServiceRequest.source == "resident_bot",
+            ServiceRequest.created_by
+            == select(User.id).where(User.max_user_id == resident_id).scalar_subquery(),
+        )
+    )
+    assert task is not None
+    employee = await db_session.scalar(select(Employee).where(Employee.max_user_id == 202))
+    assert employee is not None
+
+    await send(client, event(404, payload=f"assign:{task.id}:0:{employee.id}"))
+    await db_session.refresh(task)
+    assert task.revision == 1
+
+    await send(client, event(202, payload=f"progress:{task.id}:1:done"))
+    await db_session.refresh(task)
+    status = await db_session.get(RequestStatus, task.status_id)
+    assert status is not None and status.code == "done"
+    assert task.revision == 2
+
+    await send(client, event(resident_id, payload="resident_mine:0"))
+    resident_list = await db_session.scalar(
+        select(BotDelivery)
+        .where(BotDelivery.max_user_id == resident_id, BotDelivery.callback_id.is_(None))
+        .order_by(BotDelivery.sequence.desc())
+        .limit(1)
+    )
+    assert resident_list and resident_list.buttons
+    assert f"№{task.number} · На проверке" in resident_list.buttons[0][0]["text"]
+
+    await send(client, event(resident_id, payload=f"resident_task:{task.id}"))
+    resident_card = await db_session.scalar(
+        select(BotDelivery)
+        .where(BotDelivery.max_user_id == resident_id, BotDelivery.callback_id.is_(None))
+        .order_by(BotDelivery.sequence.desc())
+        .limit(1)
+    )
+    assert resident_card and resident_card.buttons
+    assert "Статус: На проверке" in resident_card.text
+    assert "Проблема осталась" not in [
+        item["text"] for row in resident_card.buttons for item in row
+    ]
+
+    await send(client, event(404, payload=f"task:{task.id}"))
+    operator_card = await db_session.scalar(
+        select(BotDelivery)
+        .where(BotDelivery.max_user_id == 404, BotDelivery.callback_id.is_(None))
+        .order_by(BotDelivery.sequence.desc())
+        .limit(1)
+    )
+    assert operator_card and operator_card.buttons
+    labels = [item["text"] for row in operator_card.buttons for item in row]
+    assert "Закрыть заявку" in labels
+    assert "Вернуть в работу" in labels
+
+    await send(client, event(202, payload=f"lifecycle:{task.id}:2:close"))
+    await db_session.refresh(task)
+    assert task.revision == 2
+    assert "Действие недоступно" in await latest_text(db_session, 202)
+
+    await send(client, event(404, payload=f"lifecycle:{task.id}:2:close"))
+    await db_session.refresh(task)
+    status = await db_session.get(RequestStatus, task.status_id)
+    assert status is not None and status.code == "closed"
+    assert task.revision == 3
+    assert "выполнена" in await latest_text(db_session, resident_id)
+
+    await send(client, event(resident_id, payload=f"resident_task:{task.id}"))
+    resident_card = await db_session.scalar(
+        select(BotDelivery)
+        .where(BotDelivery.max_user_id == resident_id, BotDelivery.callback_id.is_(None))
+        .order_by(BotDelivery.sequence.desc())
+        .limit(1)
+    )
+    assert resident_card and resident_card.buttons
+    assert "Статус: Выполнено" in resident_card.text
+    issue_button = next(
+        item for row in resident_card.buttons for item in row if item["text"] == "Проблема осталась"
+    )
+    assert issue_button["payload"] == f"resident_issue:{task.id}:3"
+
+    await send(client, event(resident_id, payload=issue_button["payload"]))
+    await db_session.refresh(task)
+    status = await db_session.get(RequestStatus, task.status_id)
+    assert status is not None and status.code == "resident_issue"
+    assert task.revision == 4
+    assert "проблема осталась" in (await latest_text(db_session, 404)).lower()
+
+    await send(client, event(resident_id, payload=issue_button["payload"]))
+    await db_session.refresh(task)
+    assert task.revision == 4
+    assert "уже изменился" in await latest_text(db_session, resident_id)
+
+    await send(client, event(404, payload=f"task:{task.id}"))
+    operator_card = await db_session.scalar(
+        select(BotDelivery)
+        .where(BotDelivery.max_user_id == 404, BotDelivery.callback_id.is_(None))
+        .order_by(BotDelivery.sequence.desc())
+        .limit(1)
+    )
+    assert operator_card and operator_card.buttons
+    assert "Вернуть в работу" in [item["text"] for row in operator_card.buttons for item in row]
+
+    await send(client, event(404, payload=f"lifecycle:{task.id}:4:reopen"))
+    await db_session.refresh(task)
+    status = await db_session.get(RequestStatus, task.status_id)
+    assert status is not None and status.code == "in_progress"
+    assert task.revision == 5
+    assert "вернул заявку в работу" in (await latest_text(db_session, 202)).lower()
+    assert "снова в работе" in (await latest_text(db_session, resident_id)).lower()
+
+    await send(client, event(resident_id, payload="resident_mine:0"))
+    resident_list = await db_session.scalar(
+        select(BotDelivery)
+        .where(BotDelivery.max_user_id == resident_id, BotDelivery.callback_id.is_(None))
+        .order_by(BotDelivery.sequence.desc())
+        .limit(1)
+    )
+    assert resident_list and resident_list.buttons
+    assert f"№{task.number} · В работе" in resident_list.buttons[0][0]["text"]
+
+    await send(client, event(404, text="/menu"))
+    assert "Требуют внимания: 0" in await latest_text(db_session, 404)
