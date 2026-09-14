@@ -115,9 +115,9 @@ class DeepSeekClassifier:
                         {"role": "user", "content": message},
                     ],
                     "thinking": {"type": "enabled"},
-                    "reasoning_effort": "high",
+                    "reasoning_effort": "max",
                     "response_format": {"type": "json_object"},
-                    "max_tokens": 2048,
+                    "max_tokens": 32768,
                 },
             )
         except httpx.TimeoutException:
