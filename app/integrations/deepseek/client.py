@@ -6,7 +6,7 @@ from types import TracebackType
 from typing import Literal, Self
 
 import httpx
-from pydantic import BaseModel, Field, SecretStr, ValidationError, model_validator
+from pydantic import BaseModel, Field, SecretStr, model_validator
 
 DEEPSEEK_API_BASE_URL = "https://api.deepseek.com"
 DEEPSEEK_MODEL = "deepseek-v4-flash"
@@ -135,5 +135,5 @@ class DeepSeekClassifier:
                 raise ValueError
             parsed = json.loads(content)
             return DeepSeekResult.model_validate(parsed)
-        except (KeyError, IndexError, TypeError, ValueError, ValidationError):
+        except (KeyError, IndexError, TypeError, ValueError):
             raise DeepSeekFailure("invalid_response") from None
