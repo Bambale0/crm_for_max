@@ -1,13 +1,16 @@
 """Asynchronous DeepSeek chat analyzer retries and emergency fallback."""
 
 from datetime import UTC, datetime, timedelta
+from uuid import UUID
 
+import pytest
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.bot.admin import ensure_group_chat, get_bot_settings
 from app.bot.chat_analyzer import RETRY_DELAY, analyze_one
 from app.bot.chat_signals import enqueue_chat_analysis
+from app.bot.setup import initialize
 from app.core.config import Settings
 from app.integrations.deepseek.client import DeepSeekFailure, DeepSeekResult
 from app.models.bot import BotDelivery, ChatAnalysisJob, ChatSignal
@@ -19,9 +22,25 @@ class TimeoutClassifier:
         raise DeepSeekFailure("timeout")
 
 
+@pytest.fixture
+async def bot_catalog(
+    db_session: AsyncSession,
+    test_settings: Settings,
+) -> Organization:
+    organization = await initialize(
+        db_session,
+        test_settings,
+        "Тестовая УК",
+        ["Тестовый дом 1"],
+    )
+    test_settings.max_bot_organization_id = organization.id
+    await db_session.commit()
+    return organization
+
+
 async def _queue(
     db: AsyncSession,
-    organization_id,
+    organization_id: UUID,
     *,
     event_key: str,
     text: str,
