@@ -12,6 +12,8 @@ from app.bot.dialogs import notify_owners
 from app.bot.ui import Buttons, button, reply
 from app.bot.updates import IncomingUpdate
 from app.core.config import Settings
+from app.crm.errors import CRMConflict, CRMError
+from app.crm.task_workflow import resident_problem_remains
 from app.models.bot import BotConversation
 from app.models.crm import Category, House, RequestStatus, RequestStatusHistory, ServiceRequest
 from app.models.identity import AuditLog
@@ -20,7 +22,9 @@ PAGE_SIZE = 8
 RESIDENT_STATUS = {
     "new": "Принята",
     "in_progress": "В работе",
-    "done": "Выполнено",
+    "done": "На проверке",
+    "closed": "Выполнено",
+    "resident_issue": "Передано оператору",
     "not_done": "В работе",
     "needs": "В работе",
 }
@@ -197,6 +201,17 @@ async def _show_request(
         return
     task, status = row
     visible_status = RESIDENT_STATUS.get(status.code, status.name)
+    buttons: Buttons = []
+    if status.code == "closed":
+        buttons.append(
+            [button("Проблема осталась", f"resident_issue:{task.id}:{task.revision}")]
+        )
+    buttons.extend(
+        [
+            [button("Мои заявки", "resident_mine:0")],
+            [button("Создать заявку", "resident_new"), button("Меню", "resident_menu")],
+        ]
+    )
     await reply(
         db,
         actor,
@@ -210,10 +225,7 @@ async def _show_request(
                 f"Телефон: {task.applicant_phone or '—'}",
             ]
         )[:4000],
-        [
-            [button("Мои заявки", "resident_mine:0")],
-            [button("Создать заявку", "resident_new"), button("Меню", "resident_menu")],
-        ],
+        buttons,
     )
 
 
@@ -271,6 +283,37 @@ async def handle_resident(
             await reply(db, actor, "Заявка не найдена.", resident_menu())
             return
         await _show_request(db, actor, settings, request_id)
+        return
+    if payload.startswith("resident_issue:"):
+        parts = payload.split(":")
+        if len(parts) != 3:
+            await reply(db, actor, "Эта кнопка уже неактуальна.", resident_menu())
+            return
+        try:
+            request_id = UUID(parts[1])
+            revision = int(parts[2])
+            task = await resident_problem_remains(db, actor, request_id, revision)
+        except (ValueError, CRMError):
+            await reply(
+                db,
+                actor,
+                "Статус заявки уже изменился. Откройте её заново.",
+                resident_menu(),
+            )
+            return
+        state.state, state.data = "menu", {}
+        await reply(
+            db,
+            actor,
+            f"Сообщили оператору по заявке №{task.number}, что проблема осталась.",
+            [[button("Открыть заявку", f"resident_task:{task.id}")], [button("Меню", "resident_menu")]],
+        )
+        await notify_owners(
+            db,
+            settings,
+            task,
+            prefix="Житель сообщил: проблема осталась.",
+        )
         return
     if payload.startswith("resident_cancel"):
         flow = payload.split(":", 1)[1] if ":" in payload else None
