@@ -35,6 +35,11 @@ class Settings(BaseSettings):
     max_employee_ids: Annotated[tuple[int, ...], NoDecode] = ()
     max_api_base_url: str = "https://platform-api2.max.ru"
     max_timeout_seconds: float = Field(default=10, gt=0, le=60)
+    deepseek_api_key: SecretStr | None = None
+    deepseek_base_url: str = "https://api.deepseek.com"
+    deepseek_model: Literal["deepseek-v4-flash"] = "deepseek-v4-flash"
+    deepseek_timeout_seconds: float = Field(default=3, gt=0, le=10)
+    deepseek_min_confidence: float = Field(default=0.72, ge=0.5, le=1)
     max_init_data_ttl_seconds: int = Field(default=300, ge=30, le=900)
     max_init_data_future_skew_seconds: int = Field(default=30, ge=0, le=60)
     session_ttl_seconds: int = Field(default=28800, ge=60, le=86400)
@@ -93,6 +98,13 @@ class Settings(BaseSettings):
     @property
     def max_dispatcher_ids(self) -> tuple[int, ...]:
         return tuple(dict.fromkeys((*self.max_owner_ids, *self.max_operator_ids)))
+
+    @field_validator("deepseek_base_url")
+    @classmethod
+    def check_deepseek_base_url(cls, value: str) -> str:
+        if value.rstrip("/") != "https://api.deepseek.com":
+            raise ValueError("DEEPSEEK_BASE_URL must be https://api.deepseek.com")
+        return "https://api.deepseek.com"
 
     @field_validator("database_url")
     @classmethod
