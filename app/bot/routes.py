@@ -16,6 +16,7 @@ from app.bot.admin import (
     ensure_group_chat,
     get_bot_settings,
 )
+from app.bot.chat_signals import classify_group_problem, record_signal_if_fresh
 from app.bot.dialogs import conversation, handle_staff, staff_menu
 from app.bot.identity import native_actor, resident_actor
 from app.bot.resident import handle_resident, resident_menu
@@ -28,35 +29,6 @@ from app.models.bot import BotReceipt, ChatObservation, HouseChat
 router = APIRouter(prefix="/api/bots/max", tags=["MAX bots"])
 MAX_UPDATE_BYTES = 256 * 1024
 IMPORTANT_WORDS = ("пожар", "дым", "запах газа", "прорвало", "затоп", "искрит", "авари")
-PROBLEM_WORDS = (
-    "теч",
-    "прорв",
-    "затоп",
-    "нет воды",
-    "нет света",
-    "не работает",
-    "сломал",
-    "сломано",
-    "лифт",
-    "отоплен",
-    "холодн",
-    "канализац",
-    "засор",
-    "пожар",
-    "дым",
-    "газ",
-    "искрит",
-    "авари",
-    "протек",
-    "мусор",
-)
-
-
-def looks_like_problem(text: str) -> bool:
-    normalized = " ".join(text.casefold().split())
-    return len(normalized) >= 6 and any(word in normalized for word in PROBLEM_WORDS)
-
-
 async def notify_group_problem(
     db: AsyncSession,
     settings: Settings,
@@ -134,12 +106,23 @@ async def max_webhook(
         if organization_id is not None:
             chat = await ensure_group_chat(db, organization_id, update.chat_id)
             bot_settings = await get_bot_settings(db, organization_id)
-            if (
-                bot_settings.group_analysis_enabled
-                and chat.analysis_enabled
-                and looks_like_problem(update.text)
-            ):
-                await notify_group_problem(db, settings, update.actor_id, update.text)
+            if bot_settings.group_analysis_enabled and chat.analysis_enabled:
+                classified = classify_group_problem(update.text)
+                if classified is not None:
+                    signal = await record_signal_if_fresh(
+                        db,
+                        chat_id=update.chat_id,
+                        actor_max_user_id=update.actor_id,
+                        event_key=update.event_key,
+                        classified=classified,
+                    )
+                    if signal is not None:
+                        await notify_group_problem(
+                            db,
+                            settings,
+                            signal.actor_max_user_id,
+                            signal.problem,
+                        )
         await db.commit()
         return {"ok": True}
 
