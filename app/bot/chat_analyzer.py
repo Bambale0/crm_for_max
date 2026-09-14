@@ -3,6 +3,7 @@
 import asyncio
 import logging
 from datetime import UTC, datetime, timedelta
+from uuid import UUID
 
 from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -50,7 +51,7 @@ async def notify_group_problem(
         )
 
 
-async def _locked_job(db: AsyncSession, job_id) -> ChatAnalysisJob | None:
+async def _locked_job(db: AsyncSession, job_id: UUID) -> ChatAnalysisJob | None:
     return await db.scalar(
         select(ChatAnalysisJob)
         .where(ChatAnalysisJob.id == job_id)
