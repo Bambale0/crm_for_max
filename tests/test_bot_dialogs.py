@@ -995,7 +995,7 @@ async def test_resident_request_closure_and_problem_remains_cycle(
     status = await db_session.get(RequestStatus, task.status_id)
     assert status is not None and status.code == "resident_issue"
     assert task.revision == 4
-    assert "проблема осталась" in await latest_text(db_session, 404).lower()
+    assert "проблема осталась" in (await latest_text(db_session, 404)).lower()
 
     await send(client, event(resident_id, payload=issue_button["payload"]))
     await db_session.refresh(task)
@@ -1017,8 +1017,8 @@ async def test_resident_request_closure_and_problem_remains_cycle(
     status = await db_session.get(RequestStatus, task.status_id)
     assert status is not None and status.code == "in_progress"
     assert task.revision == 5
-    assert "вернул заявку в работу" in await latest_text(db_session, 202).lower()
-    assert "снова в работе" in await latest_text(db_session, resident_id).lower()
+    assert "вернул заявку в работу" in (await latest_text(db_session, 202)).lower()
+    assert "снова в работе" in (await latest_text(db_session, resident_id)).lower()
 
     await send(client, event(resident_id, payload="resident_mine:0"))
     resident_list = await db_session.scalar(
