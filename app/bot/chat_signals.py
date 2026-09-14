@@ -165,8 +165,7 @@ def classify_group_problem(text: str) -> GroupProblem | None:
     urgent = _contains_any(searchable, URGENT_MARKERS)
     resolved = _contains_any(searchable, RESOLVED_MARKERS)
     contrast = any(
-        marker in f" {searchable} "
-        for marker in (" но ", " однако ", " зато ", " при этом ")
+        marker in f" {searchable} " for marker in (" но ", " однако ", " зато ", " при этом ")
     )
     if not urgent and resolved and not contrast:
         return None
