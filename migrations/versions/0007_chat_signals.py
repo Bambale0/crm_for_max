@@ -24,6 +24,8 @@ def upgrade() -> None:
         sa.Column("actor_max_user_id", sa.BigInteger(), nullable=False),
         sa.Column("fingerprint", sa.String(length=64), nullable=False),
         sa.Column("severity", sa.String(length=16), nullable=False),
+        sa.Column("source", sa.String(length=24), nullable=False),
+        sa.Column("confidence", sa.Float(), nullable=True),
         sa.Column("problem", sa.Text(), nullable=False),
         sa.Column(
             "created_at",
