@@ -38,7 +38,7 @@ class Settings(BaseSettings):
     deepseek_api_key: SecretStr | None = None
     deepseek_base_url: str = "https://api.deepseek.com"
     deepseek_model: Literal["deepseek-v4-flash"] = "deepseek-v4-flash"
-    deepseek_timeout_seconds: float = Field(default=8, gt=0, le=15)
+    deepseek_timeout_seconds: float = Field(default=120, gt=0, le=300)
     deepseek_min_confidence: float = Field(default=0.72, ge=0.5, le=1)
     max_init_data_ttl_seconds: int = Field(default=300, ge=30, le=900)
     max_init_data_future_skew_seconds: int = Field(default=30, ge=0, le=60)
