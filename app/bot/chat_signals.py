@@ -1,14 +1,19 @@
-"""Conservative local classifier and flood protection for group-chat problems."""
+"""DeepSeek-first group-chat classification with urgent local fallback and flood protection."""
 
 import hashlib
+import logging
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Protocol
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.integrations.deepseek.client import DeepSeekFailure, DeepSeekResult
 from app.models.bot import BotGroupChat, ChatSignal
+
+logger = logging.getLogger(__name__)
 
 URGENT_MARKERS = (
     "пожар",
@@ -18,118 +23,19 @@ URGENT_MARKERS = (
     "газом пахнет",
     "искрит",
     "коротит",
+    "короткое замыкание",
     "прорвало",
     "прорыв",
     "затапливает",
     "затопило",
-    "авария",
-    "аварий",
+    "застряли в лифте",
+    "застрял в лифте",
+    "застряла в лифте",
 )
 
-RESOLVED_MARKERS = (
-    "починили",
-    "исправили",
-    "устранили",
-    "заработал",
-    "заработала",
-    "заработало",
-    "уже работает",
-    "все работает",
-    "всё работает",
-    "все нормально",
-    "всё нормально",
-    "не течет",
-    "не течёт",
-    "вода есть",
-    "свет есть",
-)
 
-TARGETS_GENERIC = (
-    "лифт",
-    "домофон",
-    "освещ",
-    "свет",
-    "двер",
-    "замок",
-    "труба",
-    "стояк",
-    "кран",
-    "насос",
-    "вентиляц",
-)
-
-BROKEN_MARKERS = (
-    "сломался",
-    "сломалась",
-    "сломалось",
-    "сломано",
-    "сломали",
-    "не работает",
-    "не включается",
-    "не открывается",
-    "не закрывается",
-    "не едет",
-    "застрял",
-    "застряла",
-    "застряли",
-)
-
-WATER_OUTAGE_MARKERS = (
-    "нет воды",
-    "без воды",
-    "нет горячей воды",
-    "нет холодной воды",
-    "горячей воды нет",
-    "холодной воды нет",
-    "отключили воду",
-)
-
-WATER_LEAK_MARKERS = (
-    "течет",
-    "течёт",
-    "протекает",
-    "протекло",
-    "капает",
-)
-
-WATER_TARGETS = (
-    "труб",
-    "кран",
-    "стояк",
-    "потол",
-    "крыша",
-    "радиатор",
-    "батар",
-    "счетчик",
-    "счётчик",
-    "подъезд",
-    "вода",
-    "унитаз",
-    "раковин",
-)
-
-POWER_MARKERS = (
-    "нет света",
-    "света нет",
-    "нет электричества",
-    "электричества нет",
-    "выбило свет",
-    "не горит освещение",
-)
-
-SEWER_PROBLEM_MARKERS = (
-    "засор",
-    "не уходит вода",
-)
-
-SEWER_TARGETS = ("канализац",)
-SEWER_MARKERS = ("вон", "запах", "теч", "не работает")
-
-TRASH_TARGETS = ("мусор", "контейнер", "бак", "помой")
-TRASH_MARKERS = ("не вывез", "не вывоз", "переполн", "завален", "лежит", "уберите")
-
-HEATING_TARGETS = ("батар", "отоплен", "радиатор")
-HEATING_MARKERS = ("холод", "не гре", "нет отопления")
+class DeepSeekLike(Protocol):
+    async def classify(self, text: str) -> DeepSeekResult: ...
 
 
 @dataclass(frozen=True)
@@ -137,11 +43,12 @@ class GroupProblem:
     problem: str
     fingerprint: str
     severity: str
+    source: str
+    confidence: float | None
 
 
 def normalize_problem_text(text: str) -> str:
-    normalized = " ".join(text.strip().split())
-    return normalized[:3400]
+    return " ".join(text.strip().split())[:3400]
 
 
 def _searchable(text: str) -> str:
@@ -150,53 +57,58 @@ def _searchable(text: str) -> str:
     return " ".join(lowered.split())
 
 
-def _contains_any(text: str, markers: tuple[str, ...]) -> bool:
-    return any(marker.replace("ё", "е") in text for marker in markers)
+def _fingerprint(text: str) -> str:
+    return hashlib.sha256(_searchable(text).encode()).hexdigest()
 
 
-def classify_group_problem(text: str) -> GroupProblem | None:
+def urgent_fallback(text: str) -> GroupProblem | None:
     problem = normalize_problem_text(text)
-    if len(problem) < 6:
-        return None
     searchable = _searchable(problem)
     if len(searchable) < 6:
         return None
-
-    urgent = _contains_any(searchable, URGENT_MARKERS)
-    resolved = _contains_any(searchable, RESOLVED_MARKERS)
-    contrast = any(
-        marker in f" {searchable} " for marker in (" но ", " однако ", " зато ", " при этом ")
-    )
-    if not urgent and resolved and not contrast:
+    if not any(marker.replace("ё", "е") in searchable for marker in URGENT_MARKERS):
         return None
-
-    is_problem = urgent
-    is_problem = is_problem or _contains_any(searchable, WATER_OUTAGE_MARKERS)
-    is_problem = is_problem or (
-        _contains_any(searchable, WATER_LEAK_MARKERS) and _contains_any(searchable, WATER_TARGETS)
-    )
-    is_problem = is_problem or _contains_any(searchable, POWER_MARKERS)
-    is_problem = is_problem or _contains_any(searchable, SEWER_PROBLEM_MARKERS)
-    is_problem = is_problem or (
-        _contains_any(searchable, SEWER_TARGETS) and _contains_any(searchable, SEWER_MARKERS)
-    )
-    is_problem = is_problem or (
-        _contains_any(searchable, TARGETS_GENERIC) and _contains_any(searchable, BROKEN_MARKERS)
-    )
-    is_problem = is_problem or (
-        _contains_any(searchable, TRASH_TARGETS) and _contains_any(searchable, TRASH_MARKERS)
-    )
-    is_problem = is_problem or (
-        _contains_any(searchable, HEATING_TARGETS) and _contains_any(searchable, HEATING_MARKERS)
-    )
-    if not is_problem:
-        return None
-
-    fingerprint = hashlib.sha256(searchable.encode()).hexdigest()
     return GroupProblem(
         problem=problem,
-        fingerprint=fingerprint,
-        severity="urgent" if urgent else "normal",
+        fingerprint=_fingerprint(problem),
+        severity="urgent",
+        source="urgent_fallback",
+        confidence=None,
+    )
+
+
+async def classify_group_message(
+    classifier: DeepSeekLike | None,
+    text: str,
+    *,
+    min_confidence: float,
+) -> GroupProblem | None:
+    original = normalize_problem_text(text)
+    if len(_searchable(original)) < 4:
+        return None
+
+    if classifier is None:
+        return urgent_fallback(original)
+
+    try:
+        result = await classifier.classify(original)
+    except DeepSeekFailure as error:
+        logger.warning("deepseek_group_classification_failed code=%s", error.code)
+        return urgent_fallback(original)
+
+    fallback = urgent_fallback(original)
+    if not result.is_problem:
+        return fallback
+
+    if result.confidence < min_confidence:
+        return fallback
+
+    return GroupProblem(
+        problem=result.problem[:1000],
+        fingerprint=_fingerprint(original),
+        severity=result.severity,
+        source="deepseek",
+        confidence=result.confidence,
     )
 
 
@@ -246,6 +158,8 @@ async def record_signal_if_fresh(
         actor_max_user_id=actor_max_user_id,
         fingerprint=classified.fingerprint,
         severity=classified.severity,
+        source=classified.source,
+        confidence=classified.confidence,
         problem=classified.problem,
     )
     db.add(signal)
