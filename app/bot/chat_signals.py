@@ -70,14 +70,33 @@ BROKEN_MARKERS = (
     "не закрывается",
 )
 
-WATER_MARKERS = (
+WATER_OUTAGE_MARKERS = (
     "нет воды",
     "без воды",
+)
+
+WATER_LEAK_MARKERS = (
     "течет",
     "течёт",
     "протекает",
     "протекло",
     "капает",
+)
+
+WATER_TARGETS = (
+    "труб",
+    "кран",
+    "стояк",
+    "потол",
+    "крыша",
+    "радиатор",
+    "батар",
+    "счетчик",
+    "счётчик",
+    "подъезд",
+    "вода",
+    "унитаз",
+    "раковин",
 )
 
 POWER_MARKERS = (
@@ -88,10 +107,13 @@ POWER_MARKERS = (
     "не горит освещение",
 )
 
-SEWER_MARKERS = (
-    "канализация",
-    "канализац",
+SEWER_PROBLEM_MARKERS = (
     "засор",
+    "воняет канализац",
+    "запах канализац",
+    "канализация течет",
+    "канализация течёт",
+    "не уходит вода",
 )
 
 TRASH_TARGETS = ("мусор", "контейнер", "бак", "помой")
@@ -136,9 +158,13 @@ def classify_group_problem(text: str) -> GroupProblem | None:
         return None
 
     is_problem = urgent
-    is_problem = is_problem or _contains_any(searchable, WATER_MARKERS)
+    is_problem = is_problem or _contains_any(searchable, WATER_OUTAGE_MARKERS)
+    is_problem = is_problem or (
+        _contains_any(searchable, WATER_LEAK_MARKERS)
+        and _contains_any(searchable, WATER_TARGETS)
+    )
     is_problem = is_problem or _contains_any(searchable, POWER_MARKERS)
-    is_problem = is_problem or _contains_any(searchable, SEWER_MARKERS)
+    is_problem = is_problem or _contains_any(searchable, SEWER_PROBLEM_MARKERS)
     is_problem = is_problem or (
         _contains_any(searchable, TARGETS_GENERIC)
         and _contains_any(searchable, BROKEN_MARKERS)
