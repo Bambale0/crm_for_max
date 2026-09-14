@@ -9,21 +9,16 @@ from pydantic import ValidationError
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import get_db, get_deepseek_classifier, get_settings
+from app.api.dependencies import get_db, get_settings
 from app.auth.service import InvalidCredentials
-from app.bot.admin import (
-    dispatcher_max_ids,
-    ensure_group_chat,
-    get_bot_settings,
-)
-from app.bot.chat_signals import classify_group_message, record_signal_if_fresh
+from app.bot.admin import ensure_group_chat, get_bot_settings
+from app.bot.chat_signals import enqueue_chat_analysis
 from app.bot.dialogs import conversation, handle_staff, staff_menu
 from app.bot.identity import native_actor, resident_actor
 from app.bot.resident import handle_resident, resident_menu
 from app.bot.ui import reply
 from app.bot.updates import normalize_update
 from app.core.config import Settings
-from app.integrations.deepseek.client import DeepSeekClassifier
 from app.crm.errors import CRMConflict, CRMError
 from app.models.bot import BotReceipt, ChatObservation, HouseChat
 
@@ -32,34 +27,12 @@ MAX_UPDATE_BYTES = 256 * 1024
 IMPORTANT_WORDS = ("пожар", "дым", "запах газа", "прорвало", "затоп", "искрит", "авари")
 
 
-async def notify_group_problem(
-    db: AsyncSession,
-    settings: Settings,
-    max_user_id: int,
-    problem: str,
-) -> None:
-    organization_id = settings.max_bot_organization_id
-    if organization_id is None:
-        return
-    for operator_id in await dispatcher_max_ids(db, organization_id, settings.max_owner_ids):
-        try:
-            operator = await native_actor(db, settings, operator_id)
-        except InvalidCredentials:
-            continue
-        await reply(
-            db,
-            operator,
-            f"Сигнал из чата\nMAX ID: {max_user_id}\nПроблема: {problem[:3400]}",
-        )
-
-
 @router.post("/{namespace}")
 async def max_webhook(
     namespace: Literal["staff", "observer"],
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
     settings: Annotated[Settings, Depends(get_settings)],
-    deepseek: Annotated[DeepSeekClassifier | None, Depends(get_deepseek_classifier)],
 ) -> dict[str, bool]:
     secret = (
         settings.max_staff_webhook_secret
@@ -111,26 +84,13 @@ async def max_webhook(
             chat = await ensure_group_chat(db, organization_id, update.chat_id)
             bot_settings = await get_bot_settings(db, organization_id)
             if bot_settings.group_analysis_enabled and chat.analysis_enabled:
-                classified = await classify_group_message(
-                    deepseek,
-                    update.text,
-                    min_confidence=settings.deepseek_min_confidence,
+                await enqueue_chat_analysis(
+                    db,
+                    event_key=update.event_key,
+                    chat_id=update.chat_id,
+                    actor_max_user_id=update.actor_id,
+                    text=update.text,
                 )
-                if classified is not None:
-                    signal = await record_signal_if_fresh(
-                        db,
-                        chat_id=update.chat_id,
-                        actor_max_user_id=update.actor_id,
-                        event_key=update.event_key,
-                        classified=classified,
-                    )
-                    if signal is not None:
-                        await notify_group_problem(
-                            db,
-                            settings,
-                            signal.actor_max_user_id,
-                            signal.problem,
-                        )
         await db.commit()
         return {"ok": True}
 
