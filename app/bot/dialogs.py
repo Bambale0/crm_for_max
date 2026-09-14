@@ -195,13 +195,9 @@ async def task_card(
                 ]
             )
         elif status and status.code in {"closed", "resident_issue", "needs", "not_done"}:
-            rows.append(
-                [button("Вернуть в работу", f"lifecycle:{task.id}:{task.revision}:reopen")]
-            )
+            rows.append([button("Вернуть в работу", f"lifecycle:{task.id}:{task.revision}:reopen")])
         if not status or status.code != "closed":
-            rows.append(
-                [button("Назначить исполнителя", f"assignees:{task.id}:{task.revision}:0")]
-            )
+            rows.append([button("Назначить исполнителя", f"assignees:{task.id}:{task.revision}:0")])
     rows.extend([[button("Обновить", f"task:{task.id}"), button("Меню", "menu")]])
     await reply(db, actor, "\n".join(line for line in lines if line), rows)
 
