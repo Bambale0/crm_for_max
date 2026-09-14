@@ -916,6 +916,7 @@ async def test_owner_controls_group_chat_analysis(
         )
         == operator_before
     )
+    assert await db_session.scalar(select(func.count()).select_from(ChatSignal)) == 0
 
     await send(client, event(101, payload="admin_settings_group:0"))
     bot_settings = await db_session.get(BotOrganizationSettings, bot_catalog.id)
@@ -936,6 +937,7 @@ async def test_owner_controls_group_chat_analysis(
         )
         == owner_before
     )
+    assert await db_session.scalar(select(func.count()).select_from(ChatSignal)) == 0
 
     await send(client, event(101, payload="admin_settings"))
     settings_text = await latest_text(db_session, 101)
