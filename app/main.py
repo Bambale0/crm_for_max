@@ -21,6 +21,7 @@ from app.core.request_logging import RequestLoggingMiddleware
 from app.crm.catalog import router as catalog_router
 from app.crm.errors import CRMError
 from app.crm.requests import router as requests_router
+from app.integrations.deepseek.client import DeepSeekClassifier
 
 logger = logging.getLogger(__name__)
 
@@ -38,15 +39,30 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             socket_timeout=3,
             decode_responses=True,
         )
+        deepseek = (
+            DeepSeekClassifier(
+                configuration.deepseek_api_key,
+                base_url=configuration.deepseek_base_url,
+                model=configuration.deepseek_model,
+                timeout_seconds=configuration.deepseek_timeout_seconds,
+            )
+            if configuration.deepseek_api_key is not None
+            else None
+        )
         app.state.database = database
         app.state.redis = redis
+        app.state.deepseek_classifier = deepseek
         try:
             yield
         finally:
             try:
-                await redis.aclose()
+                if deepseek is not None:
+                    await deepseek.close()
             finally:
-                await database.close()
+                try:
+                    await redis.aclose()
+                finally:
+                    await database.close()
 
     app = FastAPI(
         title="Единая цифровая диспетчерская УК",
