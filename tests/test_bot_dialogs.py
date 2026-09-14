@@ -986,10 +986,7 @@ async def test_resident_request_closure_and_problem_remains_cycle(
     assert resident_card and resident_card.buttons
     assert "Статус: Выполнено" in resident_card.text
     issue_button = next(
-        item
-        for row in resident_card.buttons
-        for item in row
-        if item["text"] == "Проблема осталась"
+        item for row in resident_card.buttons for item in row if item["text"] == "Проблема осталась"
     )
     assert issue_button["payload"] == f"resident_issue:{task.id}:3"
 
@@ -1013,9 +1010,7 @@ async def test_resident_request_closure_and_problem_remains_cycle(
         .limit(1)
     )
     assert operator_card and operator_card.buttons
-    assert "Вернуть в работу" in [
-        item["text"] for row in operator_card.buttons for item in row
-    ]
+    assert "Вернуть в работу" in [item["text"] for row in operator_card.buttons for item in row]
 
     await send(client, event(404, payload=f"lifecycle:{task.id}:4:reopen"))
     await db_session.refresh(task)
