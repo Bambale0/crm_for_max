@@ -160,22 +160,18 @@ def classify_group_problem(text: str) -> GroupProblem | None:
     is_problem = urgent
     is_problem = is_problem or _contains_any(searchable, WATER_OUTAGE_MARKERS)
     is_problem = is_problem or (
-        _contains_any(searchable, WATER_LEAK_MARKERS)
-        and _contains_any(searchable, WATER_TARGETS)
+        _contains_any(searchable, WATER_LEAK_MARKERS) and _contains_any(searchable, WATER_TARGETS)
     )
     is_problem = is_problem or _contains_any(searchable, POWER_MARKERS)
     is_problem = is_problem or _contains_any(searchable, SEWER_PROBLEM_MARKERS)
     is_problem = is_problem or (
-        _contains_any(searchable, TARGETS_GENERIC)
-        and _contains_any(searchable, BROKEN_MARKERS)
+        _contains_any(searchable, TARGETS_GENERIC) and _contains_any(searchable, BROKEN_MARKERS)
     )
     is_problem = is_problem or (
-        _contains_any(searchable, TRASH_TARGETS)
-        and _contains_any(searchable, TRASH_MARKERS)
+        _contains_any(searchable, TRASH_TARGETS) and _contains_any(searchable, TRASH_MARKERS)
     )
     is_problem = is_problem or (
-        _contains_any(searchable, HEATING_TARGETS)
-        and _contains_any(searchable, HEATING_MARKERS)
+        _contains_any(searchable, HEATING_TARGETS) and _contains_any(searchable, HEATING_MARKERS)
     )
     if not is_problem:
         return None
