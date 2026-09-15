@@ -324,7 +324,7 @@ This shared baseline supplements repository-specific rules; it never replaces st
 ### Mandatory feature preflight and CONTEXT ledger
 Before implementing any material feature or cross-cutting refactor, perform a fresh audit of the current repository state. Inspect relevant docs/specs/ADRs, code, schemas/migrations, auth, admin/config surfaces, tests, CI, integrations, and runtime telemetry when available.
 
-Maintain `CONTEXT.md` as a live execution ledger for active work. Record baseline commit/SHA, current state, what exists/partial/missing/reusable, risks/dependencies, migrations/integrations/permissions/rollout impact, intended user outcome and acceptance criteria, no-hardcode/configuration decisions, observability plan, test seams, numbered steps with progress evidence, final verification, and follow-ups. Do not reconstruct it only at the end.
+Use the repository-designated execution ledger for active work. If `CONTEXT.md` is explicitly documented as that ledger, maintain it. If `CONTEXT.md` already serves another purpose, do not repurpose it; use an existing repository-local ledger path or create `docs/agents/EXECUTION.md`. Record baseline commit/SHA, current state, what exists/partial/missing/reusable, risks/dependencies, migrations/integrations/permissions/rollout impact, intended user outcome and acceptance criteria, no-hardcode/configuration decisions, observability plan, test seams, numbered steps with progress evidence, final verification, and follow-ups. Do not reconstruct it only at the end.
 
 ### No hardcode and control plane
 Mutable business/runtime behavior must not require source edits, manual SQL, or redeploys. Prices, tariffs, categories, statuses, SLA, prompts, provider/model selection, routing, thresholds, schedules, feature availability, notification templates, retry/fallback policy, permissions, and integration mappings should normally be typed, validated, database-backed, scoped, auditable, and manageable through the appropriate authenticated admin/control plane.
@@ -351,7 +351,7 @@ Prefer `failing behavior test → minimal implementation → focused checks → 
 
 For every material feature, explicitly cover where applicable: unit/domain behavior, DB/repository integration and migrations, authorization/ownership/tenant isolation, provider contracts, workflow/idempotency/retry, API integration, browser/bot E2E, smoke/deployability, observability/audit, and admin configurability/no-hardcode.
 
-Regression fixes should get regression tests when feasible. Do not mark work complete until applicable acceptance criteria and checks pass, CI is green for the exact commit, review against repository standards and the originating spec is complete, and no unresolved high-severity finding remains.
+Regression fixes should get regression tests when feasible. Do not mark work complete until applicable acceptance criteria and checks pass; when repository CI exists and is accessible, it is green for the exact commit; review against repository standards and the originating spec is complete; and no unresolved high-severity finding remains. If CI is unavailable or the repository has no CI, record that explicitly and run the closest available local checks instead.
 
 ### Delivery
 Final engineering reports should state what changed; important files/components; skills/flows used; exact tests/checks and results; migrations/config/admin changes; risks/follow-ups; and PR/commit/deploy SHA when applicable.
